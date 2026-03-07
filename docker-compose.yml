@@ -1,0 +1,13 @@
+services:
+  sefaz-api:
+    build: .
+    ports:
+      - "3333:3333"
+    volumes:
+      - certs-data:/app/certs
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  certs-data:
