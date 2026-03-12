@@ -1,6 +1,76 @@
 import * as crypto from 'crypto';
 import * as forge from 'node-forge';
 
+// =====================================================
+// CERTIFICATE CACHE
+// =====================================================
+
+const CERT_CACHE_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+interface ParsedCertCacheEntry {
+  data: {
+    privateKey: string;
+    certificate: string;
+    chain: string[];
+    notBefore: Date;
+    notAfter: Date;
+    subject: string;
+    serialNumber: string;
+  };
+  expiresAt: number;
+}
+
+const parsedCertCache = new Map<string, ParsedCertCacheEntry>();
+
+/**
+ * Creates a cache key from PFX content and password
+ */
+function getCertCacheKey(pfxBase64: string, password: string): string {
+  return crypto
+    .createHash('sha256')
+    .update(pfxBase64 + password)
+    .digest('hex');
+}
+
+/**
+ * Gets parsed certificate from cache if valid
+ */
+function getCachedParsedCert(pfxBase64: string, password: string) {
+  const key = getCertCacheKey(pfxBase64, password);
+  const entry = parsedCertCache.get(key);
+
+  if (!entry) return null;
+
+  // Check if expired
+  if (Date.now() > entry.expiresAt) {
+    parsedCertCache.delete(key);
+    return null;
+  }
+
+  // Check if certificate is still valid (not expired)
+  if (Date.now() > entry.data.notAfter.getTime()) {
+    parsedCertCache.delete(key);
+    return null;
+  }
+
+  return entry.data;
+}
+
+/**
+ * Stores parsed certificate in cache
+ */
+function setCachedParsedCert(
+  pfxBase64: string,
+  password: string,
+  data: ParsedCertCacheEntry['data']
+): void {
+  const key = getCertCacheKey(pfxBase64, password);
+  parsedCertCache.set(key, {
+    data,
+    expiresAt: Date.now() + CERT_CACHE_TTL_MS,
+  });
+}
+
 /**
  * Gera código numérico aleatório de 8 dígitos (cNF)
  */
@@ -84,7 +154,8 @@ export const UF_CODES: Record<string, string> = {
 };
 
 /**
- * Extrai certificado e chave privada de um PFX
+ * Extrai certificado e chave privada de um PFX.
+ * Uses in-memory cache with 8-hour TTL to avoid expensive parsing.
  */
 export function parsePfx(pfxBase64: string, password: string): {
   privateKey: string;
@@ -95,7 +166,14 @@ export function parsePfx(pfxBase64: string, password: string): {
   subject: string;
   serialNumber: string;
 } {
-  const pfxDer = forge.util.decode64(pfxBase64);
+  // Check cache first
+  const cached = getCachedParsedCert(pfxBase64, password);
+  if (cached) {
+    return cached;
+  }
+
+  const pfxBuf = Buffer.from(pfxBase64, 'base64');
+  const pfxDer = forge.util.createBuffer(pfxBuf.toString('binary'));
   const pkcs12Asn1 = forge.asn1.fromDer(pfxDer);
   const pkcs12 = forge.pkcs12.pkcs12FromAsn1(pkcs12Asn1, password);
 
@@ -121,7 +199,7 @@ export function parsePfx(pfxBase64: string, password: string): {
     .filter(b => b.cert)
     .map(b => forge.pki.certificateToPem(b.cert!));
 
-  return {
+  const result = {
     privateKey,
     certificate,
     chain,
@@ -130,6 +208,11 @@ export function parsePfx(pfxBase64: string, password: string): {
     subject: cert.subject.getField('CN')?.value || '',
     serialNumber: cert.serialNumber,
   };
+
+  // Store in cache for future requests
+  setCachedParsedCert(pfxBase64, password, result);
+
+  return result;
 }
 
 /**

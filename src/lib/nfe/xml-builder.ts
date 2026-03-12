@@ -121,7 +121,10 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
 
   // Simples Nacional
   if (crt === '1' || crt === '2') {
-    group['CSOSN'] = icms.csosn || '102';
+    if (!icms.csosn) {
+      throw new Error('CSOSN obrigatório para Simples Nacional (CRT 1 ou 2)');
+    }
+    group['CSOSN'] = icms.csosn;
 
     if (groupName === 'ICMSSN101') {
       if (icms.aliquota !== undefined) group['pCredSN'] = formatarValor(icms.aliquota);
@@ -147,11 +150,17 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
     // ICMSSN102 (102, 103, 300, 400) - só orig e CSOSN
   } else {
     // Regime Normal
-    group['CST'] = icms.cst || '00';
+    if (!icms.cst) {
+      throw new Error('CST ICMS obrigatório para Regime Normal (CRT 3)');
+    }
+    group['CST'] = icms.cst;
 
     switch (groupName) {
       case 'ICMS00':
-        group['modBC'] = icms.modBC || '0';
+        if (!icms.modBC) {
+          throw new Error('Modalidade BC (modBC) obrigatória para CST 00');
+        }
+        group['modBC'] = icms.modBC;
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
         if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
@@ -163,7 +172,10 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valor !== undefined) group['vICMSMono'] = formatarValor(icms.valor);
         break;
       case 'ICMS10':
-        group['modBC'] = icms.modBC || '0';
+        if (!icms.modBC) {
+          throw new Error('Modalidade BC (modBC) obrigatória para CST 10');
+        }
+        group['modBC'] = icms.modBC;
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
         if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
@@ -182,7 +194,10 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valorST !== undefined) group['vICMSMonoReten'] = formatarValor(icms.valorST);
         break;
       case 'ICMS20':
-        group['modBC'] = icms.modBC || '0';
+        if (!icms.modBC) {
+          throw new Error('Modalidade BC (modBC) obrigatória para CST 20');
+        }
+        group['modBC'] = icms.modBC;
         if (icms.pRedBC !== undefined) group['pRedBC'] = formatarValor(icms.pRedBC);
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
@@ -198,7 +213,10 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         // CST 40, 41, 50 - Isento, não tributado, suspensão - apenas orig e CST
         break;
       case 'ICMS51':
-        group['modBC'] = icms.modBC || '0';
+        if (!icms.modBC) {
+          throw new Error('Modalidade BC (modBC) obrigatória para CST 51');
+        }
+        group['modBC'] = icms.modBC;
         if (icms.pRedBC !== undefined) group['pRedBC'] = formatarValor(icms.pRedBC);
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
@@ -209,7 +227,10 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valorST !== undefined) group['vICMSSTRet'] = formatarValor(icms.valorST);
         break;
       case 'ICMS70':
-        group['modBC'] = icms.modBC || '0';
+        if (!icms.modBC) {
+          throw new Error('Modalidade BC (modBC) obrigatória para CST 70');
+        }
+        group['modBC'] = icms.modBC;
         if (icms.pRedBC !== undefined) group['pRedBC'] = formatarValor(icms.pRedBC);
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
@@ -220,7 +241,10 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
         break;
       case 'ICMS90':
-        group['modBC'] = icms.modBC || '0';
+        if (!icms.modBC) {
+          throw new Error('Modalidade BC (modBC) obrigatória para CST 90');
+        }
+        group['modBC'] = icms.modBC;
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
         if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
@@ -769,13 +793,18 @@ function gerarQRCodeNFCe(params: {
     throw new Error(`URL de QR Code não encontrada para UF: ${uf}, ambiente: ${tpAmb}`);
   }
 
-  // Formato simplificado (versao 2) - para notas online
-  // ?p=chNFe|versaoQRCode|tpAmb|cIdToken|hashQRCode
-  const cIdToken = csc.id.padStart(6, '0');
-  const concat = `${chNFe}|${versaoQRCode}|${tpAmb}|${cIdToken}${csc.token}`;
-  const hashQRCode = crypto.createHash('sha256').update(concat).digest('hex').toUpperCase();
+  let qrCodeUrl: string;
 
-  const qrCodeUrl = `${urlQRCode}?p=${chNFe}|${versaoQRCode}|${tpAmb}|${cIdToken}|${hashQRCode}`;
+  if (versaoQRCode === '3') {
+    // QR Code v3 (NT 2025.001) - emissão online: sem CSC, sem hash
+    qrCodeUrl = `${urlQRCode}?p=${chNFe}|${versaoQRCode}|${tpAmb}`;
+  } else {
+    // QR Code v2 - formato legado
+    const cIdToken = csc.id.padStart(6, '0');
+    const concat = `${chNFe}|${versaoQRCode}|${tpAmb}|${cIdToken}${csc.token}`;
+    const hashQRCode = crypto.createHash('sha256').update(concat).digest('hex').toUpperCase();
+    qrCodeUrl = `${urlQRCode}?p=${chNFe}|${versaoQRCode}|${tpAmb}|${cIdToken}|${hashQRCode}`;
+  }
 
   // URL de consulta por chave
   const consultaUrl = NFCE_CONSULTA_URL[uf.toUpperCase()]?.[tpAmb] || urlQRCode;
@@ -796,6 +825,23 @@ export function buildNFeXml(
   numero: number,
   tpAmb: '1' | '2',
 ): string {
+  // Validação rápida de campos críticos
+  if (!request.itens || request.itens.length === 0) {
+    throw new Error('NF-e deve ter ao menos 1 item');
+  }
+
+  request.itens.forEach((item, i) => {
+    if (!item.produto.ncm || item.produto.ncm.length !== 8) {
+      throw new Error(`Item ${i+1}: NCM inválido`);
+    }
+    if (!item.produto.cfop || item.produto.cfop.length !== 4) {
+      throw new Error(`Item ${i+1}: CFOP inválido`);
+    }
+    if (!item.imposto.icms.orig) {
+      throw new Error(`Item ${i+1}: origem ICMS obrigatória`);
+    }
+  });
+
   const cUF = UF_CODES[request.ufEmitente.toUpperCase()];
   if (!cUF) {
     throw new Error(`UF inválida: ${request.ufEmitente}`);
@@ -886,6 +932,14 @@ export function buildNFeXml(
     }
   }
 
+  // Responsável técnico (NT 2025.001 - obrigatório)
+  nfeObj.NFe.infNFe['infRespTec'] = {
+    CNPJ: '65609793000196',
+    xContato: 'Igor de Oliveira Gewehr',
+    email: 'igor.gewehr1@gmail.com',
+    fone: '11954409958',
+  };
+
   const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele(nfeObj);
   return doc.end({ prettyPrint: false });
 }
@@ -899,6 +953,23 @@ export function buildNFCeXml(
   numero: number,
   tpAmb: '1' | '2',
 ): string {
+  // Validação rápida de campos críticos
+  if (!request.itens || request.itens.length === 0) {
+    throw new Error('NFC-e deve ter ao menos 1 item');
+  }
+
+  request.itens.forEach((item, i) => {
+    if (!item.produto.ncm || item.produto.ncm.length !== 8) {
+      throw new Error(`Item ${i+1}: NCM inválido`);
+    }
+    if (!item.produto.cfop || item.produto.cfop.length !== 4) {
+      throw new Error(`Item ${i+1}: CFOP inválido`);
+    }
+    if (!item.imposto.icms.orig) {
+      throw new Error(`Item ${i+1}: origem ICMS obrigatória`);
+    }
+  });
+
   const cUF = UF_CODES[request.ufEmitente.toUpperCase()];
   if (!cUF) {
     throw new Error(`UF inválida: ${request.ufEmitente}`);
@@ -979,6 +1050,14 @@ export function buildNFCeXml(
     };
   }
 
+  // Responsável técnico (NT 2025.001 - obrigatório)
+  nfceObj.NFe.infNFe['infRespTec'] = {
+    CNPJ: '65609793000196',
+    xContato: 'Igor de Oliveira Gewehr',
+    email: 'igor.gewehr1@gmail.com',
+    fone: '11954409958',
+  };
+
   const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele(nfceObj);
   return doc.end({ prettyPrint: false });
 }
@@ -994,11 +1073,11 @@ export function buildNFCeSupl(
 ): string {
   const qrCode = gerarQRCodeNFCe({
     chNFe: chaveAcesso,
-    versaoQRCode: '2',
+    versaoQRCode: '3',
     tpAmb,
     csc,
     uf,
   });
 
-  return `<infNFeSupl><qrCode><![CDATA[${qrCode.qrCodeUrl}]]></qrCode><urlChave>${qrCode.urlChave}</urlChave></infNFeSupl>`;
+  return `<infNFeSupl><qrCode>${qrCode.qrCodeUrl}</qrCode><urlChave>${qrCode.urlChave}</urlChave></infNFeSupl>`;
 }

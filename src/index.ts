@@ -3,20 +3,31 @@ import { config } from './config';
 import { apiKeyAuth } from './middleware/auth';
 import nfeRoutes from './routes/nfe.routes';
 import mdfeRoutes from './routes/mdfe.routes';
+import metricsRoutes, { trackMetrics } from './routes/metrics.routes';
+import documentationRoutes from './routes/documentation.routes';
 
 const app = express();
 
 // Parse JSON bodies (max 2MB — certificados A1 são ~5KB em base64)
 app.use(express.json({ limit: '2mb' }));
 
+// Track metrics for all requests
+app.use(trackMetrics);
+
 // Health check (sem auth)
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Documentação pública (sem auth)
+app.use('/documentation', documentationRoutes);
+
 // Todas as rotas fiscais exigem API key
 app.use('/nfe', apiKeyAuth, nfeRoutes);
 app.use('/mdfe', apiKeyAuth, mdfeRoutes);
+
+// Metrics routes (protected)
+app.use('/api/metrics', apiKeyAuth, metricsRoutes);
 
 // 404
 app.use((_req, res) => {

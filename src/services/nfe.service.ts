@@ -57,6 +57,231 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Valida se valor = BC × alíquota / 100
+ */
+function validateTaxCalculation(
+  bc: number | undefined,
+  aliquota: number | undefined,
+  valor: number | undefined,
+  tolerance: number = 0.01
+): boolean {
+  if (bc === undefined || aliquota === undefined || valor === undefined) {
+    return true; // Se não tem valores, não valida
+  }
+
+  const expectedValue = (bc * aliquota) / 100;
+  const diff = Math.abs(expectedValue - valor);
+
+  return diff <= tolerance;
+}
+
+/**
+ * Valida payload de NF-e antes de gerar XML
+ */
+function validateNFePayload(req: NFeRequest): string[] {
+  const errors: string[] = [];
+
+  // Validar campos básicos
+  if (!req.numero) errors.push('Número da NF-e é obrigatório');
+  if (!req.ufEmitente || !/^[A-Z]{2}$/.test(req.ufEmitente)) {
+    errors.push('UF do emitente inválida');
+  }
+
+  // Validar emitente
+  if (!req.emitente) {
+    errors.push('Dados do emitente são obrigatórios');
+  } else {
+    if (!req.emitente.cnpj) errors.push('CNPJ do emitente é obrigatório');
+    if (!req.emitente.inscricaoEstadual) errors.push('IE do emitente é obrigatória');
+    if (!req.emitente.crt || !['1','2','3'].includes(req.emitente.crt)) {
+      errors.push('CRT do emitente inválido (1, 2 ou 3)');
+    }
+  }
+
+  // Validar destinatário
+  if (!req.destinatario) {
+    errors.push('Dados do destinatário são obrigatórios');
+  } else {
+    if (!req.destinatario.cnpj && !req.destinatario.cpf && !req.destinatario.idEstrangeiro) {
+      errors.push('Destinatário deve ter CNPJ, CPF ou ID estrangeiro');
+    }
+  }
+
+  // Validar itens
+  if (!req.itens || req.itens.length === 0) {
+    errors.push('NF-e deve ter ao menos 1 item');
+  } else {
+    req.itens.forEach((item, i) => {
+      const idx = i + 1;
+
+      // Produto
+      if (!item.produto) {
+        errors.push(`Item ${idx}: dados do produto são obrigatórios`);
+        return;
+      }
+
+      const p = item.produto;
+
+      // NCM
+      if (!p.ncm || !/^\d{8}$/.test(p.ncm)) {
+        errors.push(`Item ${idx}: NCM inválido (deve ter 8 dígitos)`);
+      }
+
+      // CFOP
+      if (!p.cfop || !/^\d{4}$/.test(p.cfop)) {
+        errors.push(`Item ${idx}: CFOP inválido (deve ter 4 dígitos)`);
+      }
+
+      // CEST (se presente)
+      if (p.cest && !/^\d{7}$/.test(p.cest)) {
+        errors.push(`Item ${idx}: CEST inválido (deve ter 7 dígitos)`);
+      }
+
+      // Descrição
+      if (!p.descricao || p.descricao.trim().length === 0) {
+        errors.push(`Item ${idx}: descrição do produto é obrigatória`);
+      }
+
+      // Valores
+      if (!p.quantidade || p.quantidade <= 0) {
+        errors.push(`Item ${idx}: quantidade deve ser maior que zero`);
+      }
+      if (!p.valorUnitario || p.valorUnitario < 0) {
+        errors.push(`Item ${idx}: valor unitário inválido`);
+      }
+
+      // Impostos
+      if (!item.imposto) {
+        errors.push(`Item ${idx}: dados de impostos são obrigatórios`);
+        return;
+      }
+
+      // ICMS
+      if (!item.imposto.icms) {
+        errors.push(`Item ${idx}: dados de ICMS são obrigatórios`);
+      } else {
+        const icms = item.imposto.icms;
+
+        // Origem
+        if (!icms.orig || !/^[0-7]$/.test(icms.orig)) {
+          errors.push(`Item ${idx}: origem do ICMS inválida (0-7)`);
+        }
+
+        // CST ou CSOSN
+        const crt = req.emitente?.crt;
+        if (crt === '1' || crt === '2') {
+          // Simples Nacional
+          if (!icms.csosn) {
+            errors.push(`Item ${idx}: CSOSN obrigatório para Simples Nacional`);
+          }
+        } else if (crt === '3') {
+          // Regime Normal
+          if (!icms.cst) {
+            errors.push(`Item ${idx}: CST ICMS obrigatório para Regime Normal`);
+          }
+        }
+
+        // Validar campos conforme CST/CSOSN
+        const situacao = icms.cst || icms.csosn;
+        if (situacao) {
+          // Tributados: precisam de modBC, vBC, pICMS, vICMS
+          const tributados = ['00', '10', '20', '51', '70', '90', '101', '201', '900'];
+          if (tributados.includes(situacao)) {
+            if (icms.valorBC !== undefined && icms.valorBC > 0) {
+              if (!icms.modBC) {
+                errors.push(`Item ${idx}: modalidade BC obrigatória para ICMS tributado`);
+              }
+              if (!icms.aliquota && icms.aliquota !== 0) {
+                errors.push(`Item ${idx}: alíquota ICMS obrigatória quando há BC`);
+              }
+
+              // Validar cálculo
+              if (icms.valorBC && icms.aliquota !== undefined && icms.valor !== undefined) {
+                if (!validateTaxCalculation(icms.valorBC, icms.aliquota, icms.valor)) {
+                  errors.push(`Item ${idx}: valor ICMS inconsistente (esperado ${(icms.valorBC * icms.aliquota / 100).toFixed(2)})`);
+                }
+              }
+            }
+          }
+
+          // ST: precisam de modBCST, vBCST, pICMSST, vICMSST
+          const comST = ['10', '30', '70', '90', '201', '202', '203', '900'];
+          if (comST.includes(situacao) && icms.valorBCST !== undefined && icms.valorBCST > 0) {
+            if (!icms.modBCST) {
+              errors.push(`Item ${idx}: modalidade BC ST obrigatória`);
+            }
+
+            // Validar cálculo ST
+            if (icms.valorBCST && icms.aliquotaST !== undefined && icms.valorST !== undefined) {
+              if (!validateTaxCalculation(icms.valorBCST, icms.aliquotaST, icms.valorST)) {
+                errors.push(`Item ${idx}: valor ICMS ST inconsistente (esperado ${(icms.valorBCST * icms.aliquotaST / 100).toFixed(2)})`);
+              }
+            }
+          }
+        }
+      }
+
+      // PIS
+      if (!item.imposto.pis || !item.imposto.pis.cst) {
+        errors.push(`Item ${idx}: CST do PIS é obrigatório`);
+      } else {
+        const pis = item.imposto.pis;
+        // Validar cálculo PIS para CST tributados
+        if (['01', '02'].includes(pis.cst)) {
+          if (pis.valorBC && pis.aliquota !== undefined && pis.valor !== undefined) {
+            if (!validateTaxCalculation(pis.valorBC, pis.aliquota, pis.valor)) {
+              errors.push(`Item ${idx}: valor PIS inconsistente (esperado ${(pis.valorBC * pis.aliquota / 100).toFixed(2)})`);
+            }
+          }
+        }
+      }
+
+      // COFINS
+      if (!item.imposto.cofins || !item.imposto.cofins.cst) {
+        errors.push(`Item ${idx}: CST do COFINS é obrigatório`);
+      } else {
+        const cofins = item.imposto.cofins;
+        // Validar cálculo COFINS para CST tributados
+        if (['01', '02'].includes(cofins.cst)) {
+          if (cofins.valorBC && cofins.aliquota !== undefined && cofins.valor !== undefined) {
+            if (!validateTaxCalculation(cofins.valorBC, cofins.aliquota, cofins.valor)) {
+              errors.push(`Item ${idx}: valor COFINS inconsistente (esperado ${(cofins.valorBC * cofins.aliquota / 100).toFixed(2)})`);
+            }
+          }
+        }
+      }
+
+      // IPI (se presente)
+      if (item.imposto.ipi) {
+        if (!item.imposto.ipi.cst) {
+          errors.push(`Item ${idx}: CST do IPI é obrigatório`);
+        }
+        if (!item.imposto.ipi.cEnq) {
+          errors.push(`Item ${idx}: código de enquadramento IPI é obrigatório`);
+        }
+
+        // Validar cálculo IPI
+        const ipi = item.imposto.ipi;
+        if (['00', '49', '50', '99'].includes(ipi.cst)) {
+          if (ipi.valorBC && ipi.aliquota !== undefined && ipi.valor !== undefined) {
+            if (!validateTaxCalculation(ipi.valorBC, ipi.aliquota, ipi.valor)) {
+              errors.push(`Item ${idx}: valor IPI inconsistente (esperado ${(ipi.valorBC * ipi.aliquota / 100).toFixed(2)})`);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // Validar pagamento
+  if (!req.pagamento || !req.pagamento.formas || req.pagamento.formas.length === 0) {
+    errors.push('Formas de pagamento são obrigatórias');
+  }
+
+  return errors;
+}
+
+/**
  * Interpreta o status da SEFAZ e retorna o status padronizado
  */
 function interpretarStatus(cStat: string): SefazResponse['status'] {
@@ -233,6 +458,18 @@ function gerarChaveENumero(params: {
  */
 export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
   try {
+    // VALIDAÇÃO ANTES DE GERAR XML
+    const validationErrors = validateNFePayload(request);
+    if (validationErrors.length > 0) {
+      return {
+        success: false,
+        status: 'erro',
+        codigoStatus: '400',
+        motivoStatus: 'Dados inválidos: ' + validationErrors.join('; '),
+        erros: validationErrors,
+      };
+    }
+
     const tpAmb = getTpAmb();
     const ambiente = config.sefazAmbiente;
     const serie = request.serie || '1';
@@ -252,9 +489,9 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
     // 3. Assinar o XML
     const signedXml = assinarXml(nfeXml, request.certificado, 'infNFe');
 
-    // 4. Envelopar no enviNFe (assíncrono: indSinc=0)
+    // 4. Envelopar no enviNFe (síncrono: indSinc=1 para lote com 1 NF-e)
     const loteId = gerarIdLote();
-    const soapBody = wrapEnviNFe(signedXml, loteId, '0');
+    const soapBody = wrapEnviNFe(signedXml, loteId, '1');
 
     // 5. Obter endpoint e enviar
     const endpoints = getNFeEndpoints(request.ufEmitente, ambiente);
@@ -373,12 +610,203 @@ async function pollRetAutorizacao(
 }
 
 /**
+ * Valida payload de NFC-e antes de gerar XML
+ */
+function validateNFCePayload(req: NFCeRequest): string[] {
+  const errors: string[] = [];
+
+  // Validar campos básicos
+  if (!req.numero) errors.push('Número da NFC-e é obrigatório');
+  if (!req.ufEmitente || !/^[A-Z]{2}$/.test(req.ufEmitente)) {
+    errors.push('UF do emitente inválida');
+  }
+
+  // Validar emitente
+  if (!req.emitente) {
+    errors.push('Dados do emitente são obrigatórios');
+  } else {
+    if (!req.emitente.cnpj) errors.push('CNPJ do emitente é obrigatório');
+    if (!req.emitente.inscricaoEstadual) errors.push('IE do emitente é obrigatória');
+    if (!req.emitente.crt || !['1','2','3'].includes(req.emitente.crt)) {
+      errors.push('CRT do emitente inválido (1, 2 ou 3)');
+    }
+  }
+
+  // Validar CSC (obrigatório para NFCe)
+  if (!req.csc || !req.csc.id || !req.csc.token) {
+    errors.push('CSC (Código de Segurança do Contribuinte) é obrigatório para NFC-e');
+  }
+
+  // Validar itens (mesma lógica da NFe)
+  if (!req.itens || req.itens.length === 0) {
+    errors.push('NFC-e deve ter ao menos 1 item');
+  } else {
+    req.itens.forEach((item, i) => {
+      const idx = i + 1;
+
+      if (!item.produto) {
+        errors.push(`Item ${idx}: dados do produto são obrigatórios`);
+        return;
+      }
+
+      const p = item.produto;
+
+      if (!p.ncm || !/^\d{8}$/.test(p.ncm)) {
+        errors.push(`Item ${idx}: NCM inválido (deve ter 8 dígitos)`);
+      }
+
+      if (!p.cfop || !/^\d{4}$/.test(p.cfop)) {
+        errors.push(`Item ${idx}: CFOP inválido (deve ter 4 dígitos)`);
+      }
+
+      if (p.cest && !/^\d{7}$/.test(p.cest)) {
+        errors.push(`Item ${idx}: CEST inválido (deve ter 7 dígitos)`);
+      }
+
+      if (!p.descricao || p.descricao.trim().length === 0) {
+        errors.push(`Item ${idx}: descrição do produto é obrigatória`);
+      }
+
+      if (!p.quantidade || p.quantidade <= 0) {
+        errors.push(`Item ${idx}: quantidade deve ser maior que zero`);
+      }
+      if (!p.valorUnitario || p.valorUnitario < 0) {
+        errors.push(`Item ${idx}: valor unitário inválido`);
+      }
+
+      if (!item.imposto) {
+        errors.push(`Item ${idx}: dados de impostos são obrigatórios`);
+        return;
+      }
+
+      if (!item.imposto.icms) {
+        errors.push(`Item ${idx}: dados de ICMS são obrigatórios`);
+      } else {
+        const icms = item.imposto.icms;
+
+        if (!icms.orig || !/^[0-7]$/.test(icms.orig)) {
+          errors.push(`Item ${idx}: origem do ICMS inválida (0-7)`);
+        }
+
+        const crt = req.emitente?.crt;
+        if (crt === '1' || crt === '2') {
+          if (!icms.csosn) {
+            errors.push(`Item ${idx}: CSOSN obrigatório para Simples Nacional`);
+          }
+        } else if (crt === '3') {
+          if (!icms.cst) {
+            errors.push(`Item ${idx}: CST ICMS obrigatório para Regime Normal`);
+          }
+        }
+
+        const situacao = icms.cst || icms.csosn;
+        if (situacao) {
+          const tributados = ['00', '10', '20', '51', '70', '90', '101', '201', '900'];
+          if (tributados.includes(situacao)) {
+            if (icms.valorBC !== undefined && icms.valorBC > 0) {
+              if (!icms.modBC) {
+                errors.push(`Item ${idx}: modalidade BC obrigatória para ICMS tributado`);
+              }
+              if (!icms.aliquota && icms.aliquota !== 0) {
+                errors.push(`Item ${idx}: alíquota ICMS obrigatória quando há BC`);
+              }
+
+              if (icms.valorBC && icms.aliquota !== undefined && icms.valor !== undefined) {
+                if (!validateTaxCalculation(icms.valorBC, icms.aliquota, icms.valor)) {
+                  errors.push(`Item ${idx}: valor ICMS inconsistente (esperado ${(icms.valorBC * icms.aliquota / 100).toFixed(2)})`);
+                }
+              }
+            }
+          }
+
+          const comST = ['10', '30', '70', '90', '201', '202', '203', '900'];
+          if (comST.includes(situacao) && icms.valorBCST !== undefined && icms.valorBCST > 0) {
+            if (!icms.modBCST) {
+              errors.push(`Item ${idx}: modalidade BC ST obrigatória`);
+            }
+
+            if (icms.valorBCST && icms.aliquotaST !== undefined && icms.valorST !== undefined) {
+              if (!validateTaxCalculation(icms.valorBCST, icms.aliquotaST, icms.valorST)) {
+                errors.push(`Item ${idx}: valor ICMS ST inconsistente (esperado ${(icms.valorBCST * icms.aliquotaST / 100).toFixed(2)})`);
+              }
+            }
+          }
+        }
+      }
+
+      if (!item.imposto.pis || !item.imposto.pis.cst) {
+        errors.push(`Item ${idx}: CST do PIS é obrigatório`);
+      } else {
+        const pis = item.imposto.pis;
+        if (['01', '02'].includes(pis.cst)) {
+          if (pis.valorBC && pis.aliquota !== undefined && pis.valor !== undefined) {
+            if (!validateTaxCalculation(pis.valorBC, pis.aliquota, pis.valor)) {
+              errors.push(`Item ${idx}: valor PIS inconsistente (esperado ${(pis.valorBC * pis.aliquota / 100).toFixed(2)})`);
+            }
+          }
+        }
+      }
+
+      if (!item.imposto.cofins || !item.imposto.cofins.cst) {
+        errors.push(`Item ${idx}: CST do COFINS é obrigatório`);
+      } else {
+        const cofins = item.imposto.cofins;
+        if (['01', '02'].includes(cofins.cst)) {
+          if (cofins.valorBC && cofins.aliquota !== undefined && cofins.valor !== undefined) {
+            if (!validateTaxCalculation(cofins.valorBC, cofins.aliquota, cofins.valor)) {
+              errors.push(`Item ${idx}: valor COFINS inconsistente (esperado ${(cofins.valorBC * cofins.aliquota / 100).toFixed(2)})`);
+            }
+          }
+        }
+      }
+
+      if (item.imposto.ipi) {
+        if (!item.imposto.ipi.cst) {
+          errors.push(`Item ${idx}: CST do IPI é obrigatório`);
+        }
+        if (!item.imposto.ipi.cEnq) {
+          errors.push(`Item ${idx}: código de enquadramento IPI é obrigatório`);
+        }
+
+        const ipi = item.imposto.ipi;
+        if (['00', '49', '50', '99'].includes(ipi.cst)) {
+          if (ipi.valorBC && ipi.aliquota !== undefined && ipi.valor !== undefined) {
+            if (!validateTaxCalculation(ipi.valorBC, ipi.aliquota, ipi.valor)) {
+              errors.push(`Item ${idx}: valor IPI inconsistente (esperado ${(ipi.valorBC * ipi.aliquota / 100).toFixed(2)})`);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // Validar pagamento
+  if (!req.pagamento || !req.pagamento.formas || req.pagamento.formas.length === 0) {
+    errors.push('Formas de pagamento são obrigatórias');
+  }
+
+  return errors;
+}
+
+/**
  * Emite uma NFCe (modelo 65) - síncrono (indSinc=1)
  */
 export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    // VALIDAÇÃO ANTES DE GERAR XML
+    const validationErrors = validateNFCePayload(request);
+    if (validationErrors.length > 0) {
+      return {
+        success: false,
+        status: 'erro',
+        codigoStatus: '400',
+        motivoStatus: 'Dados inválidos: ' + validationErrors.join('; '),
+        erros: validationErrors,
+      };
+    }
+
+    const ambiente = (request as any).ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
     const serie = request.serie || '1';
 
     // 1. Gerar chave de acesso
@@ -396,9 +824,9 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
     // 3. Assinar o XML
     let signedXml = assinarXml(nfceXml, request.certificado, 'infNFe');
 
-    // 4. Inserir infNFeSupl após assinatura (deve ficar entre Signature e </NFe>)
+    // 4. Inserir infNFeSupl após assinatura (deve ficar entre </infNFe> e <Signature>, conforme XSD)
     const nfceSupl = buildNFCeSupl(chaveAcesso, tpAmb, request.csc, request.ufEmitente);
-    signedXml = signedXml.replace('</NFe>', `${nfceSupl}</NFe>`);
+    signedXml = signedXml.replace('<Signature', `${nfceSupl}<Signature`);
 
     // 5. Envelopar no enviNFe (síncrono: indSinc=1)
     const loteId = gerarIdLote();

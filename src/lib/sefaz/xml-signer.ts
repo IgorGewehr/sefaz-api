@@ -7,7 +7,7 @@ import type { CertificateData } from '../../types';
  *
  * SEFAZ exige:
  * - Assinatura enveloped (dentro do próprio XML)
- * - Algoritmo RSA-SHA1
+ * - Algoritmo RSA-SHA256 (migração de SHA1 para SHA256)
  * - Canonicalização exclusiva (C14N)
  * - Reference aponta para o Id do elemento assinado (ex: infNFe, infMDFe)
  * - X509Certificate incluído no KeyInfo
@@ -35,7 +35,7 @@ export function assinarXml(
   const sig = new SignedXml({
     privateKey,
     publicCert: certificate,
-    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
     signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
     getKeyInfoContent: () => `<X509Data><X509Certificate>${certPem}</X509Certificate></X509Data>`,
   });
@@ -45,7 +45,7 @@ export function assinarXml(
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
     transforms: [
       'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-      'http://www.w3.org/2001/10/xml-exc-c14n#',
+      'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
     ],
   });
 

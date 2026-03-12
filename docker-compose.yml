@@ -8,6 +8,27 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1024m
+          cpus: "1.0"
+        reservations:
+          memory: 128m
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - sefaz-api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"
+        reservations:
+          memory: 32m
 
 volumes:
   certs-data:

@@ -17,21 +17,21 @@ interface WebServices {
 // --- NFe (Modelo 55) ---
 
 const NFE_SVRS_PRODUCAO: WebServices = {
-  autorizacao: 'https://nfe.svrs.rs.gov.br/ws/NfeAutorizacao4/NFeAutorizacao4.asmx',
-  retAutorizacao: 'https://nfe.svrs.rs.gov.br/ws/NfeRetAutorizacao4/NFeRetAutorizacao4.asmx',
-  consultaProtocolo: 'https://nfe.svrs.rs.gov.br/ws/NfeConsulta4/NfeConsulta4.asmx',
-  statusServico: 'https://nfe.svrs.rs.gov.br/ws/NfeStatusServico4/NfeStatusServico4.asmx',
-  inutilizacao: 'https://nfe.svrs.rs.gov.br/ws/nfeinutilizacao4/nfeinutilizacao4.asmx',
-  recepcaoEvento: 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento4/recepcaoevento4.asmx',
+  autorizacao: 'https://nfe.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://nfe.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://nfe.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx',
+  statusServico: 'https://nfe.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx',
+  inutilizacao: 'https://nfe.svrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx',
+  recepcaoEvento: 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx',
 };
 
 const NFE_SVRS_HOMOLOGACAO: WebServices = {
-  autorizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeAutorizacao4/NFeAutorizacao4.asmx',
-  retAutorizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeRetAutorizacao4/NFeRetAutorizacao4.asmx',
-  consultaProtocolo: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeConsulta4/NfeConsulta4.asmx',
-  statusServico: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeStatusServico4/NfeStatusServico4.asmx',
-  inutilizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/nfeinutilizacao4/nfeinutilizacao4.asmx',
-  recepcaoEvento: 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento4/recepcaoevento4.asmx',
+  autorizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx',
+  statusServico: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx',
+  inutilizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx',
+  recepcaoEvento: 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx',
 };
 
 // SVAN (Sefaz Virtual Ambiente Nacional) - MA
@@ -271,21 +271,21 @@ const NFE_ENDPOINTS: Record<string, Record<Ambiente, WebServices>> = {
 // --- NFCe (Modelo 65) - Usa SVRS para a maioria ---
 
 const NFCE_SVRS_PRODUCAO: WebServices = {
-  autorizacao: 'https://nfce.svrs.rs.gov.br/ws/NfeAutorizacao4/NFeAutorizacao4.asmx',
-  retAutorizacao: 'https://nfce.svrs.rs.gov.br/ws/NfeRetAutorizacao4/NFeRetAutorizacao4.asmx',
-  consultaProtocolo: 'https://nfce.svrs.rs.gov.br/ws/NfeConsulta4/NfeConsulta4.asmx',
-  statusServico: 'https://nfce.svrs.rs.gov.br/ws/NfeStatusServico4/NfeStatusServico4.asmx',
-  inutilizacao: 'https://nfce.svrs.rs.gov.br/ws/nfeinutilizacao4/nfeinutilizacao4.asmx',
-  recepcaoEvento: 'https://nfce.svrs.rs.gov.br/ws/recepcaoevento4/recepcaoevento4.asmx',
+  autorizacao: 'https://nfce.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://nfce.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://nfce.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx',
+  statusServico: 'https://nfce.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx',
+  inutilizacao: 'https://nfce.svrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx',
+  recepcaoEvento: 'https://nfce.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx',
 };
 
 const NFCE_SVRS_HOMOLOGACAO: WebServices = {
-  autorizacao: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeAutorizacao4/NFeAutorizacao4.asmx',
-  retAutorizacao: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeRetAutorizacao4/NFeRetAutorizacao4.asmx',
-  consultaProtocolo: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeConsulta4/NfeConsulta4.asmx',
-  statusServico: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeStatusServico4/NfeStatusServico4.asmx',
-  inutilizacao: 'https://nfce-homologacao.svrs.rs.gov.br/ws/nfeinutilizacao4/nfeinutilizacao4.asmx',
-  recepcaoEvento: 'https://nfce-homologacao.svrs.rs.gov.br/ws/recepcaoevento4/recepcaoevento4.asmx',
+  autorizacao: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx',
+  statusServico: 'https://nfce-homologacao.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx',
+  inutilizacao: 'https://nfce-homologacao.svrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx',
+  recepcaoEvento: 'https://nfce-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx',
 };
 
 const NFCE_SP_PRODUCAO: WebServices = {
