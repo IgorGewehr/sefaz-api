@@ -36,13 +36,13 @@ export function assinarXml(
     privateKey,
     publicCert: certificate,
     canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
-    signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+    signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
     getKeyInfoContent: () => `<X509Data><X509Certificate>${certPem}</X509Certificate></X509Data>`,
   });
 
   sig.addReference({
     xpath: `//*[@Id='${idMatch[1]}']`,
-    digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
+    digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     transforms: [
       'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
       'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',

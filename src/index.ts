@@ -2,6 +2,7 @@ import express from 'express';
 import { config } from './config';
 import { apiKeyAuth } from './middleware/auth';
 import nfeRoutes from './routes/nfe.routes';
+import nfseRoutes from './routes/nfse.routes';
 import mdfeRoutes from './routes/mdfe.routes';
 import metricsRoutes, { trackMetrics } from './routes/metrics.routes';
 import documentationRoutes from './routes/documentation.routes';
@@ -24,6 +25,7 @@ app.use('/documentation', documentationRoutes);
 
 // Todas as rotas fiscais exigem API key
 app.use('/nfe', apiKeyAuth, nfeRoutes);
+app.use('/nfse', apiKeyAuth, nfseRoutes);
 app.use('/mdfe', apiKeyAuth, mdfeRoutes);
 
 // Metrics routes (protected)
@@ -46,6 +48,7 @@ app.listen(config.port, '0.0.0.0', () => {
   console.log(`Endpoints:`);
   console.log(`  NFe:  POST /nfe/emitir, /nfe/consultar, /nfe/cancelar, /nfe/carta-correcao, /nfe/inutilizar, /nfe/status`);
   console.log(`  NFCe: POST /nfe/nfce/emitir`);
+  console.log(`  NFSe: POST /nfse/emitir, /nfse/lote, /nfse/consultar-lote, /nfse/consultar, /nfse/cancelar`);
   console.log(`  MDFe: POST /mdfe/emitir, /mdfe/consultar, /mdfe/encerrar, /mdfe/cancelar, /mdfe/status`);
 });
 
