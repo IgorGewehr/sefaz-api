@@ -67,9 +67,10 @@ router.post('/emitir', async (req: Request, res: Response) => {
 // POST /mdfe/consultar - Consultar MDF-e
 router.post('/consultar', async (req: Request, res: Response) => {
   try {
-    const { chaveAcesso, certificado } = req.body as {
+    const { chaveAcesso, certificado, ambiente } = req.body as {
       chaveAcesso: string;
       certificado: CertificateData;
+      ambiente?: 'producao' | 'homologacao';
     };
 
     if (!chaveAcesso || chaveAcesso.length !== 44) {
@@ -81,7 +82,7 @@ router.post('/consultar', async (req: Request, res: Response) => {
       return;
     }
 
-    const result = await mdfeService.consultarMdfe(chaveAcesso, certificado);
+    const result = await mdfeService.consultarMdfe(chaveAcesso, certificado, ambiente);
     res.json(result);
   } catch (err: any) {
     console.error('[MDF-e] Erro ao consultar:', err.message);
@@ -154,14 +155,14 @@ router.post('/cancelar', async (req: Request, res: Response) => {
 // POST /mdfe/status - Status do serviço SEFAZ MDF-e
 router.post('/status', async (req: Request, res: Response) => {
   try {
-    const { certificado } = req.body as { certificado: CertificateData };
+    const { certificado, ambiente } = req.body as { certificado: CertificateData; ambiente?: 'producao' | 'homologacao' };
 
     if (!certificado?.pfxBase64 || !certificado?.password) {
       res.status(400).json({ error: 'Certificado digital é obrigatório' });
       return;
     }
 
-    const result = await mdfeService.statusServico(certificado);
+    const result = await mdfeService.statusServico(certificado, ambiente);
     res.json(result);
   } catch (err: any) {
     console.error('[MDF-e] Erro ao consultar status:', err.message);

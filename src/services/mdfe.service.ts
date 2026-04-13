@@ -38,8 +38,8 @@ import type {
  */
 export async function emitirMdfe(request: MdfeRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
     const endpoints = getMDFeEndpoints(ambiente);
 
     const serie = request.serie || '1';
@@ -122,11 +122,12 @@ export async function emitirMdfe(request: MdfeRequest): Promise<SefazResponse> {
 export async function consultarMdfe(
   chaveAcesso: string,
   certificado: CertificateData,
+  ambiente?: 'producao' | 'homologacao',
 ): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
-    const endpoints = getMDFeEndpoints(ambiente);
+    const ambienteEfetivo = ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambienteEfetivo === 'producao' ? '1' : '2';
+    const endpoints = getMDFeEndpoints(ambienteEfetivo);
 
     const consultaXml = `<consSitMDFe xmlns="http://www.portalfiscal.inf.br/mdfe" versao="3.00">
   <tpAmb>${tpAmb}</tpAmb>
@@ -168,8 +169,8 @@ export async function consultarMdfe(
  */
 export async function encerrarMdfe(request: MdfeEncerrarRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
     const endpoints = getMDFeEndpoints(ambiente);
 
     // Extrair CNPJ da chave de acesso (posições 6-19)
@@ -221,8 +222,8 @@ export async function encerrarMdfe(request: MdfeEncerrarRequest): Promise<SefazR
  */
 export async function cancelarMdfe(request: MdfeCancelarRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
     const endpoints = getMDFeEndpoints(ambiente);
 
     // Extrair CNPJ da chave de acesso (posições 6-19)
@@ -281,11 +282,11 @@ export async function cancelarMdfe(request: MdfeCancelarRequest): Promise<SefazR
 /**
  * Consulta o status do serviço MDF-e no SEFAZ.
  */
-export async function statusServico(certificado: CertificateData): Promise<SefazResponse> {
+export async function statusServico(certificado: CertificateData, ambiente?: 'producao' | 'homologacao'): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
-    const endpoints = getMDFeEndpoints(ambiente);
+    const ambienteEfetivo = ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambienteEfetivo === 'producao' ? '1' : '2';
+    const endpoints = getMDFeEndpoints(ambienteEfetivo);
 
     const statusXml = `<consStatServMDFe xmlns="http://www.portalfiscal.inf.br/mdfe" versao="3.00">
   <tpAmb>${tpAmb}</tpAmb>

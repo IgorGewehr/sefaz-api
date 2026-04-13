@@ -162,7 +162,7 @@ describe('E2E: Emissão de NF-e (sefaz-api)', () => {
       const erros = ['Item 1: NCM inválido (deve ter 8 dígitos)']
       mockValidateNFePayload.mockReturnValue(erros)
 
-      expect(mockValidateNFePayload(payloadInvalido)).toContain('Item 1: NCM inválido')
+      expect(mockValidateNFePayload(payloadInvalido).some((e: string) => e.includes('NCM inválido'))).toBe(true)
     })
 
     it('deve rejeitar payload com valores inconsistentes', () => {
@@ -183,7 +183,7 @@ describe('E2E: Emissão de NF-e (sefaz-api)', () => {
       const erros = ['Item 1: valor ICMS inconsistente (esperado 18.00)']
       mockValidateNFePayload.mockReturnValue(erros)
 
-      expect(mockValidateNFePayload(payloadInvalido)).toContain('valor ICMS inconsistente')
+      expect(mockValidateNFePayload(payloadInvalido).some((e: string) => e.includes('valor ICMS inconsistente'))).toBe(true)
     })
   })
 

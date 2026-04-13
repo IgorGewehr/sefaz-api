@@ -190,6 +190,8 @@ export interface NFeRequest {
   };
   // Certificado digital
   certificado: CertificateData;
+  // Ambiente de emissão (sobrescreve SEFAZ_AMBIENTE do servidor)
+  ambiente?: 'producao' | 'homologacao';
   // Série (padrão '1' para NFe)
   serie?: string;
   // Número da nota (OBRIGATÓRIO — sequencial, controlado pelo emissor)
@@ -214,6 +216,7 @@ export interface NFCeRequest {
     token: string;
   };
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
   serie?: string;
   numero: number;
   ufEmitente: string;
@@ -289,6 +292,7 @@ export interface MdfeRequest {
   pesoBrutoTotal: number;
   seguro?: MdfeSeguro;
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
   serie?: string;
   numero: number;
   informacoesAdicionais?: string;
@@ -316,6 +320,7 @@ export interface MdfeEncerrarRequest {
   uf: string;
   dataEncerramento?: string; // YYYY-MM-DD
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
 }
 
 export interface MdfeCancelarRequest {
@@ -323,6 +328,7 @@ export interface MdfeCancelarRequest {
   protocolo: string;
   justificativa: string; // 15-255 chars
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
 }
 
 export interface NFeCancelarRequest {
@@ -330,6 +336,7 @@ export interface NFeCancelarRequest {
   protocolo: string;
   justificativa: string; // 15-255 chars
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;
 }
 
@@ -338,6 +345,7 @@ export interface NFeCartaCorrecaoRequest {
   correcao: string; // 15-1000 chars
   sequencia?: number; // Sequência do evento (default 1)
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;
 }
 
@@ -350,17 +358,20 @@ export interface NFeInutilizarRequest {
   modelo: '55' | '65'; // 55=NFe, 65=NFCe
   ano: string; // 2 dígitos
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;
 }
 
 export interface NFeConsultaRequest {
   chaveAcesso: string;
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;
 }
 
 export interface StatusServicoRequest {
   certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;
   modelo?: '55' | '65'; // 55=NFe, 65=NFCe
 }

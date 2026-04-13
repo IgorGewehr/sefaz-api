@@ -211,6 +211,12 @@ function buildServico(parent: any, servico: NfseServico, valores: NfseValores): 
   // --- Código do serviço (Item Lista Serviço) ---
   servicoNode.ele(NFSE_NS, 'ItemListaServico').txt(servico.codigoServico);
 
+  // --- Código de tributação nacional (cTribNac — Padrão Nacional ADN) ---
+  if (servico.codigoTributacaoNacional) {
+    servicoNode.ele(NFSE_NS, 'CodigoTributacaoNacional')
+      .txt(servico.codigoTributacaoNacional);
+  }
+
   // --- Código CNAE ---
   if (servico.cnae) {
     servicoNode.ele(NFSE_NS, 'CodigoCnae').txt(servico.cnae);

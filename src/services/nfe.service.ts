@@ -393,6 +393,30 @@ function parseRetAutorizacao(retorno: any): SefazResponse {
 }
 
 /**
+ * Monta o envelope <nfeProc> (XML autorizado padrão SEFAZ).
+ * O <nfeProc> agrupa <NFe> + <protNFe> e é o formato salvo pelo emissor
+ * após autorização — necessário para geração do DANFE.
+ */
+function buildNfeProcEnvelope(signedXml: string, resultado: SefazResponse, tpAmb: '1' | '2'): string {
+  return (
+    `<nfeProc versao="4.00" xmlns="${SEFAZ_NS}">` +
+    signedXml +
+    `<protNFe versao="4.00">` +
+    `<infProt>` +
+    `<tpAmb>${tpAmb}</tpAmb>` +
+    `<verAplic>SefazAPI-1.0</verAplic>` +
+    `<chNFe>${resultado.chaveAcesso || ''}</chNFe>` +
+    `<dhRecbto>${resultado.dataRecebimento || ''}</dhRecbto>` +
+    `<nProt>${resultado.protocolo || ''}</nProt>` +
+    `<cStat>${resultado.codigoStatus}</cStat>` +
+    `<xMotivo>${escapeXml(resultado.motivoStatus)}</xMotivo>` +
+    `</infProt>` +
+    `</protNFe>` +
+    `</nfeProc>`
+  );
+}
+
+/**
  * Envolve a NFe assinada no envelope enviNFe para autorização
  */
 function wrapEnviNFe(signedXml: string, loteId: string, indSinc: '0' | '1'): string {
@@ -470,8 +494,8 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
       };
     }
 
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
     const serie = request.serie || '1';
 
     // 1. Gerar chave de acesso
@@ -521,9 +545,9 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
         pollingResult.chaveAcesso = chaveAcesso;
       }
 
-      // Incluir XML assinado na resposta se autorizado
+      // Incluir XML autorizado (nfeProc) na resposta se autorizado
       if (pollingResult.success) {
-        pollingResult.xml = signedXml;
+        pollingResult.xml = buildNfeProcEnvelope(signedXml, pollingResult, tpAmb);
       }
 
       return pollingResult;
@@ -531,10 +555,10 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
 
     // Se já tem resultado definitivo
     if (resultado.success) {
-      resultado.xml = signedXml;
       if (!resultado.chaveAcesso) {
         resultado.chaveAcesso = chaveAcesso;
       }
+      resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
     }
 
     return resultado;
@@ -805,7 +829,7 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
       };
     }
 
-    const ambiente = (request as any).ambiente || config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
     const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
     const serie = request.serie || '1';
 
@@ -846,10 +870,10 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
     const resultado = parseRetAutorizacao(retorno);
 
     if (resultado.success) {
-      resultado.xml = signedXml;
       if (!resultado.chaveAcesso) {
         resultado.chaveAcesso = chaveAcesso;
       }
+      resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
     }
 
     return resultado;
@@ -869,8 +893,8 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
  */
 export async function consultarProtocolo(request: NFeConsultaRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
 
     const soapBody =
       `<nfeDadosMsg xmlns="${CONSULTA_NS}">` +
@@ -940,8 +964,8 @@ export async function consultarProtocolo(request: NFeConsultaRequest): Promise<S
  */
 export async function cancelarNFe(request: NFeCancelarRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
 
     const chave = request.chaveAcesso;
     const cUF = chave.substring(0, 2);
@@ -1015,8 +1039,8 @@ export async function cancelarNFe(request: NFeCancelarRequest): Promise<SefazRes
  */
 export async function cartaCorrecao(request: NFeCartaCorrecaoRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
 
     const chave = request.chaveAcesso;
     const cUF = chave.substring(0, 2);
@@ -1093,8 +1117,8 @@ export async function cartaCorrecao(request: NFeCartaCorrecaoRequest): Promise<S
  */
 export async function inutilizar(request: NFeInutilizarRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
 
     const cUF = UF_CODES[request.ufEmitente.toUpperCase()];
     if (!cUF) {
@@ -1176,8 +1200,8 @@ export async function inutilizar(request: NFeInutilizarRequest): Promise<SefazRe
  */
 export async function statusServico(request: StatusServicoRequest): Promise<SefazResponse> {
   try {
-    const tpAmb = getTpAmb();
-    const ambiente = config.sefazAmbiente;
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
 
     const cUF = UF_CODES[request.ufEmitente.toUpperCase()];
     if (!cUF) {
