@@ -2,7 +2,8 @@
 // SaoPauloProvider — NFS-e via Nota Fiscal Paulistana
 //
 // Protocolo: SOAP 1.1 (lotenfe.asmx)
-// Endpoint:  https://nfews.prefeitura.sp.gov.br/lotenfe.asmx
+// Endpoint prod:  https://nfews.prefeitura.sp.gov.br/lotenfe.asmx
+// Endpoint homol: https://nfehmg.prefeitura.sp.gov.br/lotenfe.asmx
 // Namespace: http://www.prefeitura.sp.gov.br/nfe
 //
 // Particularidades:
@@ -30,13 +31,20 @@ import type {
 import { enviarSoap, extrairBodySoap } from '../sefaz/soap-client';
 import { parsePfx, apenasNumeros, escapeXml, formatarData } from '../utils';
 import { config } from '../../config';
+import { resolveCodigoServicoSP } from './service-codes-sp';
 
 // ============================================================
 // Constantes
 // ============================================================
 
-const SP_URL = 'https://nfews.prefeitura.sp.gov.br/lotenfe.asmx';
-const SP_NS  = 'http://www.prefeitura.sp.gov.br/nfe';
+const SP_URL_PRODUCAO   = 'https://nfews.prefeitura.sp.gov.br/lotenfe.asmx';
+const SP_URL_HOMOLOGACAO = 'https://nfehmg.prefeitura.sp.gov.br/lotenfe.asmx';
+const SP_NS             = 'http://www.prefeitura.sp.gov.br/nfe';
+
+function getSpUrl(ambiente?: string): string {
+  const amb = ambiente || config.sefazAmbiente || 'producao';
+  return amb === 'homologacao' ? SP_URL_HOMOLOGACAO : SP_URL_PRODUCAO;
+}
 
 // ============================================================
 // RPS Hash Signature — assinatura proprietária de SP
@@ -159,12 +167,24 @@ function buildPedidoEnvioRPS(request: NfseEmitirRequest): string {
   const tributacao   = resolveTributacao(request);
   const dataEmissao  = request.rps.dataEmissao || formatarData();
 
-  // Código de serviço municipal (SP usa 4-5 dígitos próprios)
-  const codigoServico = (
-    request.servico.codigoTributacaoMunicipio
+  // Código de serviço municipal (SP usa 4-5 dígitos próprios, NÃO LC 116).
+  // Preferência: codigoTributacaoMunicipio informado pelo usuário.
+  // Fallback: de-para automático LC 116 → código SP via service-codes-sp.ts.
+  const codigoServicoRaw = request.servico.codigoTributacaoMunicipio
+    || resolveCodigoServicoSP(request.servico.codigoServico || '')
     || request.servico.codigoServico
-    || ''
-  ).replace(/\D/g, '').padStart(5, '0');
+    || '';
+
+  if (!request.servico.codigoTributacaoMunicipio && request.servico.codigoServico) {
+    const traduzido = resolveCodigoServicoSP(request.servico.codigoServico);
+    if (traduzido) {
+      console.log(`[SP] Código de serviço LC 116 "${request.servico.codigoServico}" → código municipal SP "${traduzido}" (automático)`);
+    } else {
+      console.warn(`[SP] Código de serviço LC 116 "${request.servico.codigoServico}" sem mapeamento para SP — enviando como código municipal direto. Informe codigoTributacaoMunicipio para evitar rejeição.`);
+    }
+  }
+
+  const codigoServico = codigoServicoRaw.replace(/\D/g, '').padStart(5, '0');
 
   // Alíquota já normalizada como decimal (0.05 = 5%)
   const aliquota = request.valores.aliquotaIss;
@@ -396,7 +416,9 @@ async function enviarParaSP(
   operacao: string,
   xmlAssinado: string,
   certificado: CertificateData,
+  ambiente?: string,
 ): Promise<string> {
+  const url = getSpUrl(ambiente);
   const soapBody = [
     `<${operacao}Request xmlns="${SP_NS}">`,
     `<VersaoSchema>1</VersaoSchema>`,
@@ -405,7 +427,7 @@ async function enviarParaSP(
   ].join('');
 
   const soapAction = `${SP_NS}/${operacao}`;
-  return enviarSoap(SP_URL, soapAction, soapBody, certificado);
+  return enviarSoap(url, soapAction, soapBody, certificado);
 }
 
 // ============================================================
@@ -555,7 +577,7 @@ export class SaoPauloProvider implements INfseProvider {
       const xmlAssinado = assinarXmlSP(xml, request.certificado);
 
       // 3. Enviar via SOAP para lotenfe.asmx
-      const soapResp = await enviarParaSP('EnvioRPS', xmlAssinado, request.certificado);
+      const soapResp = await enviarParaSP('EnvioRPS', xmlAssinado, request.certificado, request.ambiente);
 
       // 4. Parsear resposta
       return parseRetornoEnvioRPS(soapResp);
@@ -580,7 +602,7 @@ export class SaoPauloProvider implements INfseProvider {
       const xmlAssinado = assinarXmlSP(xml, request.certificado);
 
       // 3. Enviar
-      const soapResp = await enviarParaSP('CancelamentoNFe', xmlAssinado, request.certificado);
+      const soapResp = await enviarParaSP('CancelamentoNFe', xmlAssinado, request.certificado, request.ambiente);
 
       // 4. Parsear
       return parseRetornoCancelamento(soapResp);
@@ -605,7 +627,7 @@ export class SaoPauloProvider implements INfseProvider {
       const xmlAssinado = assinarXmlSP(xml, request.certificado);
 
       // Enviar
-      const soapResp = await enviarParaSP('ConsultaNFe', xmlAssinado, request.certificado);
+      const soapResp = await enviarParaSP('ConsultaNFe', xmlAssinado, request.certificado, request.ambiente);
 
       // Parsear
       return parseRetornoConsulta(soapResp);
