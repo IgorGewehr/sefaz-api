@@ -37,9 +37,10 @@ import { resolveCodigoServicoSP } from './service-codes-sp';
 // Constantes
 // ============================================================
 
-const SP_URL_PRODUCAO   = 'https://nfews.prefeitura.sp.gov.br/lotenfe.asmx';
+const SP_URL_PRODUCAO    = 'https://nfews.prefeitura.sp.gov.br/lotenfe.asmx';
 const SP_URL_HOMOLOGACAO = 'https://nfehmg.prefeitura.sp.gov.br/lotenfe.asmx';
-const SP_NS             = 'http://www.prefeitura.sp.gov.br/nfe';
+const SP_NS              = 'http://www.prefeitura.sp.gov.br/nfe';
+const SP_SOAP_ACTION_BASE = 'http://www.prefeitura.sp.gov.br/nfe/ws';
 
 function getSpUrl(ambiente?: string): string {
   const amb = ambiente || config.sefazAmbiente || 'producao';
@@ -243,9 +244,9 @@ function buildPedidoEnvioRPS(request: NfseEmitirRequest): string {
   // --- XML ---
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<PedidoEnvioRPS xmlns="${SP_NS}">`,
+    `<nfe:PedidoEnvioRPS xmlns:nfe="${SP_NS}">`,
     `<Cabecalho Versao="1">`,
-    `<CNPJRemetente><CNPJ>${cnpj}</CNPJ></CNPJRemetente>`,
+    `<CPFCNPJRemetente><CNPJ>${cnpj}</CNPJ></CPFCNPJRemetente>`,
     `</Cabecalho>`,
     `<RPS>`,
     `<Assinatura>${assinatura}</Assinatura>`,
@@ -271,7 +272,7 @@ function buildPedidoEnvioRPS(request: NfseEmitirRequest): string {
     tomadorXml,
     `<Discriminacao>${discriminacao}</Discriminacao>`,
     `</RPS>`,
-    `</PedidoEnvioRPS>`,
+    `</nfe:PedidoEnvioRPS>`,
   ].join('');
 }
 
@@ -293,10 +294,10 @@ function buildPedidoCancelamentoNFe(
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<PedidoCancelamentoNFe xmlns="${SP_NS}">`,
+    `<nfe:PedidoCancelamentoNFe xmlns:nfe="${SP_NS}">`,
     `<Cabecalho Versao="1">`,
-    `<CNPJRemetente><CNPJ>${cnpj}</CNPJ></CNPJRemetente>`,
-    `<Transacao>true</Transacao>`,
+    `<CPFCNPJRemetente><CNPJ>${cnpj}</CNPJ></CPFCNPJRemetente>`,
+    `<transacao>true</transacao>`,
     `</Cabecalho>`,
     `<Detalhe>`,
     `<ChaveNFe>`,
@@ -305,7 +306,7 @@ function buildPedidoCancelamentoNFe(
     `</ChaveNFe>`,
     `<AssinaturaCancelamento>${assinaturaCancelamento}</AssinaturaCancelamento>`,
     `</Detalhe>`,
-    `</PedidoCancelamentoNFe>`,
+    `</nfe:PedidoCancelamentoNFe>`,
   ].join('');
 }
 
@@ -325,9 +326,9 @@ function buildConsultaNFeXml(
   if (numero) {
     return [
       `<?xml version="1.0" encoding="UTF-8"?>`,
-      `<PedidoConsultaNFe xmlns="${SP_NS}">`,
+      `<nfe:PedidoConsultaNFe xmlns:nfe="${SP_NS}">`,
       `<Cabecalho Versao="1">`,
-      `<CNPJRemetente><CNPJ>${cnpj}</CNPJ></CNPJRemetente>`,
+      `<CPFCNPJRemetente><CNPJ>${cnpj}</CNPJ></CPFCNPJRemetente>`,
       `</Cabecalho>`,
       `<Detalhe>`,
       `<ChaveNFe>`,
@@ -335,16 +336,16 @@ function buildConsultaNFeXml(
       `<NumeroNFe>${numero}</NumeroNFe>`,
       `</ChaveNFe>`,
       `</Detalhe>`,
-      `</PedidoConsultaNFe>`,
+      `</nfe:PedidoConsultaNFe>`,
     ].join('');
   }
 
   // Consulta por chave RPS
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<PedidoConsultaNFe xmlns="${SP_NS}">`,
+    `<nfe:PedidoConsultaNFe xmlns:nfe="${SP_NS}">`,
     `<Cabecalho Versao="1">`,
-    `<CNPJRemetente><CNPJ>${cnpj}</CNPJ></CNPJRemetente>`,
+    `<CPFCNPJRemetente><CNPJ>${cnpj}</CNPJ></CPFCNPJRemetente>`,
     `</Cabecalho>`,
     `<Detalhe>`,
     `<ChaveRPS>`,
@@ -353,7 +354,7 @@ function buildConsultaNFeXml(
     `<NumeroRPS>${numeroRPS || 0}</NumeroRPS>`,
     `</ChaveRPS>`,
     `</Detalhe>`,
-    `</PedidoConsultaNFe>`,
+    `</nfe:PedidoConsultaNFe>`,
   ].join('');
 }
 
@@ -426,8 +427,9 @@ async function enviarParaSP(
     `</${operacao}Request>`,
   ].join('');
 
-  const soapAction = `${SP_NS}/${operacao}`;
-  return enviarSoap(url, soapAction, soapBody, certificado);
+  const actionName = operacao.charAt(0).toLowerCase() + operacao.slice(1);
+  const soapAction = `${SP_SOAP_ACTION_BASE}/${actionName}`;
+  return enviarSoap(url, soapAction, soapBody, certificado, '1.2');
 }
 
 // ============================================================
@@ -580,7 +582,12 @@ export class SaoPauloProvider implements INfseProvider {
       const soapResp = await enviarParaSP('EnvioRPS', xmlAssinado, request.certificado, request.ambiente);
 
       // 4. Parsear resposta
-      return parseRetornoEnvioRPS(soapResp);
+      const result = parseRetornoEnvioRPS(soapResp);
+      if (result.success && result.numeroNfse && result.codigoVerificacao) {
+        const im = apenasNumeros(request.prestador.inscricaoMunicipal);
+        result.linkVisualizacao = `https://nfe.prefeitura.sp.gov.br/contribuinte/notaprint.aspx?inscricao=${im}&nf=${result.numeroNfse}&verificacao=${result.codigoVerificacao}`;
+      }
+      return result;
     } catch (error: any) {
       return {
         success: false,

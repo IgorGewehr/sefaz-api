@@ -81,15 +81,22 @@ export async function enviarSoap(
   soapAction: string,
   xmlBody: string,
   certificado: CertificateData,
+  soapVersion: '1.1' | '1.2' = '1.1',
 ): Promise<string> {
   const startTime = Date.now();
 
+  const isSoap12 = soapVersion === '1.2';
+  const soapNs = isSoap12
+    ? 'http://www.w3.org/2003/05/soap-envelope'
+    : 'http://schemas.xmlsoap.org/soap/envelope/';
+  const soapPrefix = isSoap12 ? 'soap12' : 'soap';
+
   const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
+<${soapPrefix}:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:${soapPrefix}="${soapNs}">
+  <${soapPrefix}:Body>
     ${xmlBody}
-  </soap:Body>
-</soap:Envelope>`;
+  </${soapPrefix}:Body>
+</${soapPrefix}:Envelope>`;
 
   // Log request
   logSoapRequest(url, soapAction, xmlBody);
@@ -100,17 +107,26 @@ export async function enviarSoap(
     // Get or create reusable agent with keep-alive
     const agent = getOrCreateAgent(certificado);
 
+    const contentType = isSoap12
+      ? `application/soap+xml; charset=utf-8; action="${soapAction}"`
+      : 'text/xml; charset=utf-8';
+
     const options: https.RequestOptions = {
       hostname: urlObj.hostname,
       port: 443,
       path: urlObj.pathname + urlObj.search,
       method: 'POST',
-      agent, // Use reusable agent with keep-alive
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': `"${soapAction}"`,
-        'Content-Length': Buffer.byteLength(soapEnvelope, 'utf-8'),
-      },
+      agent,
+      headers: isSoap12
+        ? {
+            'Content-Type': contentType,
+            'Content-Length': Buffer.byteLength(soapEnvelope, 'utf-8'),
+          }
+        : {
+            'Content-Type': contentType,
+            'SOAPAction': `"${soapAction}"`,
+            'Content-Length': Buffer.byteLength(soapEnvelope, 'utf-8'),
+          },
     };
 
     const req = https.request(options, (res) => {

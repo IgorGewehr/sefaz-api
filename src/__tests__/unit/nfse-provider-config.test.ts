@@ -11,12 +11,12 @@ describe('resolveProviderType', () => {
     expect(resolveProviderType('4205407')).toBe('betha');
   });
 
-  it('retorna "betha" para São José/SC (4213104)', () => {
-    expect(resolveProviderType('4213104')).toBe('betha');
+  it('retorna "betha" para São José/SC (4216402)', () => {
+    expect(resolveProviderType('4216402')).toBe('betha');
   });
 
-  it('retorna "nacional" para São Paulo/SP (3550308)', () => {
-    expect(resolveProviderType('3550308')).toBe('nacional');
+  it('retorna "saopaulo" para São Paulo/SP (3550308)', () => {
+    expect(resolveProviderType('3550308')).toBe('saopaulo');
   });
 
   it('retorna "nacional" para município desconhecido', () => {
@@ -51,8 +51,8 @@ describe('getProvider / getProviderName', () => {
     expect(getProviderName('4207601')).toBe('Betha Cloud');
   });
 
-  it('retorna NacionalProvider para São Paulo', () => {
-    expect(getProviderName('3550308')).toBe('Nacional (ADN)');
+  it('retorna SaoPauloProvider para São Paulo', () => {
+    expect(getProviderName('3550308')).toBe('São Paulo (Nota Fiscal Paulistana)');
   });
 
   it('provider Betha tem método emitir', () => {
