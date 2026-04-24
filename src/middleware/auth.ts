@@ -9,6 +9,18 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
+/**
+ * Constant-time membership test against a list of valid keys.
+ * Iterates all entries regardless of match to avoid timing leaks between positions.
+ */
+function matchesAny(candidate: string, valid: string[]): boolean {
+  let matched = false;
+  for (const k of valid) {
+    if (safeEqual(candidate, k)) matched = true;
+  }
+  return matched;
+}
+
 export function apiKeyAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
@@ -23,7 +35,7 @@ export function apiKeyAuth(req: Request, res: Response, next: NextFunction): voi
     return;
   }
 
-  if (!safeEqual(token, config.apiKey!)) {
+  if (!matchesAny(token, config.apiKeys)) {
     res.status(403).json({ error: 'API key inválida' });
     return;
   }

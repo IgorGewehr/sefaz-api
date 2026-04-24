@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import * as mdfeService from '../services/mdfe.service';
-import { validarCNPJ, validarChaveAcesso } from '../lib/utils';
+import { validarCNPJ, validarChaveAcesso, parsePfx, certCnpjBate } from '../lib/utils';
+import { config } from '../config';
 import type {
   MdfeRequest,
   MdfeEncerrarRequest,
@@ -9,6 +10,27 @@ import type {
 } from '../types';
 
 const router = Router();
+
+function certMismatch(res: Response, certificado: CertificateData, emitenteCnpj: string): boolean {
+  let parsed: ReturnType<typeof parsePfx>;
+  try {
+    parsed = parsePfx(certificado.pfxBase64, certificado.password);
+  } catch (err: any) {
+    res.status(400).json({ error: `Certificado inválido: ${err.message || 'não foi possível decodificar o PFX'}` });
+    return true;
+  }
+  if (parsed.notAfter.getTime() < Date.now()) {
+    res.status(400).json({ error: `Certificado expirado em ${parsed.notAfter.toISOString()}` });
+    return true;
+  }
+  if (config.validateCertCnpj && !certCnpjBate(parsed.cnpj, emitenteCnpj)) {
+    res.status(403).json({
+      error: 'CNPJ do certificado não corresponde ao CNPJ do emitente informado no payload',
+    });
+    return true;
+  }
+  return false;
+}
 
 // POST /mdfe/emitir - Emitir MDF-e
 router.post('/emitir', async (req: Request, res: Response) => {
@@ -59,6 +81,7 @@ router.post('/emitir', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Certificado digital (pfxBase64 + password) é obrigatório' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.emitente.cnpj)) return;
 
     const result = await mdfeService.emitirMdfe(data);
     const statusCode = result.success ? 200 : 422;
@@ -116,6 +139,7 @@ router.post('/encerrar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Certificado digital é obrigatório' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.chaveAcesso.substring(6, 20))) return;
 
     const result = await mdfeService.encerrarMdfe(data);
     const statusCode = result.success ? 200 : 422;
@@ -147,6 +171,7 @@ router.post('/cancelar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Certificado digital é obrigatório' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.chaveAcesso.substring(6, 20))) return;
 
     const result = await mdfeService.cancelarMdfe(data);
     const statusCode = result.success ? 200 : 422;

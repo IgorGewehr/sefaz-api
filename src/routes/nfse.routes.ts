@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import * as nfseService from '../services/nfse.service';
-import { validarCNPJ, validarCPF } from '../lib/utils';
+import { validarCNPJ, validarCPF, parsePfx, certCnpjBate } from '../lib/utils';
+import { config } from '../config';
+import type { CertificateData } from '../types';
 import type {
   NfseEmitirRequest,
   NfseEnviarLoteRequest,
@@ -10,6 +12,27 @@ import type {
 } from '../types/nfse';
 
 const router = Router();
+
+function certMismatch(res: Response, certificado: CertificateData, prestadorCnpj: string): boolean {
+  let parsed: ReturnType<typeof parsePfx>;
+  try {
+    parsed = parsePfx(certificado.pfxBase64, certificado.password);
+  } catch (err: any) {
+    res.status(400).json({ error: `Certificado inválido: ${err.message || 'não foi possível decodificar o PFX'}` });
+    return true;
+  }
+  if (parsed.notAfter.getTime() < Date.now()) {
+    res.status(400).json({ error: `Certificado expirado em ${parsed.notAfter.toISOString()}` });
+    return true;
+  }
+  if (config.validateCertCnpj && !certCnpjBate(parsed.cnpj, prestadorCnpj)) {
+    res.status(403).json({
+      error: 'CNPJ do certificado não corresponde ao CNPJ do prestador informado no payload',
+    });
+    return true;
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Normaliza o payload recebido (novo formato DPS ou formato legado rps.*)
@@ -134,6 +157,7 @@ router.post('/emitir', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Certificado digital (pfxBase64 + password) é obrigatório' });
       return;
     }
+    if (certMismatch(res, body.certificado, cnpj)) return;
 
     const normalized = normalizeEmitirRequest(body);
     const result = await nfseService.emitirNfse(normalized);
@@ -162,6 +186,7 @@ router.post('/lote', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Certificado digital é obrigatório' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.prestador.cnpj)) return;
 
     const result = await nfseService.enviarLoteRps(data);
     const statusCode = result.success ? 200 : 422;
@@ -245,6 +270,7 @@ router.post('/cancelar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Certificado digital é obrigatório' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.prestador.cnpj)) return;
 
     const result = await nfseService.cancelarNfse(data);
     const statusCode = result.success ? 200 : 422;

@@ -17,6 +17,8 @@ interface ParsedCertCacheEntry {
     notAfter: Date;
     subject: string;
     serialNumber: string;
+    /** CNPJ (14 dígitos) extraído do subject/SAN, se presente. */
+    cnpj?: string;
   };
   expiresAt: number;
 }
@@ -181,6 +183,7 @@ export function parsePfx(pfxBase64: string, password: string): {
   notAfter: Date;
   subject: string;
   serialNumber: string;
+  cnpj?: string;
 } {
   // Check cache first
   const cached = getCachedParsedCert(pfxBase64, password);
@@ -215,14 +218,18 @@ export function parsePfx(pfxBase64: string, password: string): {
     .filter(b => b.cert)
     .map(b => forge.pki.certificateToPem(b.cert!));
 
+  const subject = cert.subject.getField('CN')?.value || '';
+  const cnpj = extrairCnpjDoCert(cert, subject);
+
   const result = {
     privateKey,
     certificate,
     chain,
     notBefore: cert.validity.notBefore,
     notAfter: cert.validity.notAfter,
-    subject: cert.subject.getField('CN')?.value || '',
+    subject,
     serialNumber: cert.serialNumber,
+    cnpj,
   };
 
   // Store in cache for future requests
@@ -236,6 +243,56 @@ export function parsePfx(pfxBase64: string, password: string): {
  */
 export function pfxToBuffer(pfxBase64: string): Buffer {
   return Buffer.from(pfxBase64, 'base64');
+}
+
+/**
+ * Extrai o CNPJ (14 dígitos) do certificado ICP-Brasil.
+ *
+ * Ordem de tentativas:
+ *  1. subjectAltName → otherName com OID 2.16.76.1.3.3 (pessoa jurídica ICP-Brasil)
+ *     O valor é uma string começando com 8 dígitos de data (YYYYMMDD) + 14 dígitos de CNPJ.
+ *  2. Fallback: procura uma sequência de 14 dígitos no CN (padrão "RAZÃO SOCIAL:CNPJ").
+ *
+ * Retorna `undefined` se nenhum CNPJ for encontrado (cert de pessoa física, por exemplo).
+ */
+function extrairCnpjDoCert(cert: forge.pki.Certificate, subjectCN: string): string | undefined {
+  // 1. subjectAltName (OID 2.5.29.17) → procurar otherName com OID CNPJ
+  try {
+    const san = cert.extensions.find(e => e.name === 'subjectAltName');
+    if (san && Array.isArray(san.altNames)) {
+      for (const alt of san.altNames as any[]) {
+        // type=0 é otherName em node-forge. O valor vem em alt.value ou alt.oid
+        if (alt.oid === '2.16.76.1.3.3' && typeof alt.value === 'string') {
+          // Valor: 8 dígitos data + 14 dígitos CNPJ = 22 dígitos
+          const digits = alt.value.replace(/\D/g, '');
+          if (digits.length >= 22) {
+            return digits.slice(8, 22);
+          }
+          if (digits.length === 14) {
+            return digits;
+          }
+        }
+      }
+    }
+  } catch {
+    // extensão malformada — cai no fallback
+  }
+
+  // 2. Fallback: regex no CN
+  const m = subjectCN.match(/(\d{14})/);
+  if (m) return m[1];
+
+  return undefined;
+}
+
+/**
+ * Compara o CNPJ extraído do certificado com o CNPJ do emitente informado no payload.
+ * Retorna true se iguais ou se o certificado não expõe CNPJ (pessoa física / formato fora do padrão).
+ * Só rejeita quando há CNPJ extraído E é diferente.
+ */
+export function certCnpjBate(certCnpj: string | undefined, emitenteCnpj: string): boolean {
+  if (!certCnpj) return true; // sem CNPJ no cert → não bloqueia (pode ser CPF ICP-Brasil)
+  return apenasNumeros(certCnpj) === apenasNumeros(emitenteCnpj);
 }
 
 /**
