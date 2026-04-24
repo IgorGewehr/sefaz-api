@@ -6,6 +6,7 @@ import * as forge from 'node-forge';
 // =====================================================
 
 const CERT_CACHE_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const CERT_CACHE_MAX = parseInt(process.env.CERT_CACHE_MAX || '200', 10);
 
 interface ParsedCertCacheEntry {
   data: {
@@ -65,6 +66,13 @@ function setCachedParsedCert(
   data: ParsedCertCacheEntry['data']
 ): void {
   const key = getCertCacheKey(pfxBase64, password);
+  // LRU: remove oldest entry if at capacity
+  if (parsedCertCache.size >= CERT_CACHE_MAX && !parsedCertCache.has(key)) {
+    const oldestKey = parsedCertCache.keys().next().value;
+    if (oldestKey !== undefined) parsedCertCache.delete(oldestKey);
+  }
+  // Re-insert to push to the end (Map keeps insertion order)
+  parsedCertCache.delete(key);
   parsedCertCache.set(key, {
     data,
     expiresAt: Date.now() + CERT_CACHE_TTL_MS,
@@ -111,6 +119,9 @@ export function calcularDV(chave43: string): string {
 /**
  * Monta chave de acesso (44 dígitos)
  * Formato: cUF(2) + AAMM(4) + CNPJ(14) + mod(2) + serie(3) + nNF(9) + tpEmis(1) + cNF(8) + cDV(1)
+ *
+ * AAMM é calculado no timezone da UF do emitente para evitar off-by-one quando
+ * o servidor roda em UTC e a emissão ocorre no fim do dia no Brasil.
  */
 export function montarChaveAcesso(params: {
   cUF: string;
@@ -121,11 +132,16 @@ export function montarChaveAcesso(params: {
   numero: number;
   tipoEmissao: string;
   codigoNumerico: string;
+  uf?: string;
 }): string {
-  const { cUF, dataEmissao, cnpj, modelo, serie, numero, tipoEmissao, codigoNumerico } = params;
+  const { cUF, dataEmissao, cnpj, modelo, serie, numero, tipoEmissao, codigoNumerico, uf } = params;
 
-  const aamm = String(dataEmissao.getFullYear()).slice(2) +
-    String(dataEmissao.getMonth() + 1).padStart(2, '0');
+  // Converter para timezone da UF (default -03:00) antes de extrair AAMM
+  const tz = (uf && UF_TIMEZONE_OFFSET[uf.toUpperCase()]) || DEFAULT_OFFSET;
+  const localMs = dataEmissao.getTime() - tz.hours * 60 * 60 * 1000;
+  const local = new Date(localMs);
+  const aamm = String(local.getUTCFullYear()).slice(2) +
+    String(local.getUTCMonth() + 1).padStart(2, '0');
 
   const chave43 =
     cUF.padStart(2, '0') +
@@ -280,4 +296,54 @@ export function gerarIdLote(): string {
  */
 export function apenasNumeros(str: string): string {
   return str.replace(/\D/g, '');
+}
+
+/**
+ * Valida CNPJ (14 dígitos + DV).
+ * Rejeita sequências repetidas (00000000000000, 11111111111111...).
+ */
+export function validarCNPJ(cnpj: string): boolean {
+  const d = apenasNumeros(cnpj);
+  if (d.length !== 14) return false;
+  if (/^(\d)\1+$/.test(d)) return false;
+
+  const calc = (base: string, weights: number[]): number => {
+    let sum = 0;
+    for (let i = 0; i < weights.length; i++) sum += parseInt(base[i], 10) * weights[i];
+    const r = sum % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  const w1 = [5,4,3,2,9,8,7,6,5,4,3,2];
+  const w2 = [6,5,4,3,2,9,8,7,6,5,4,3,2];
+  const dv1 = calc(d.slice(0, 12), w1);
+  const dv2 = calc(d.slice(0, 12) + dv1, w2);
+  return d[12] === String(dv1) && d[13] === String(dv2);
+}
+
+/**
+ * Valida CPF (11 dígitos + DV).
+ */
+export function validarCPF(cpf: string): boolean {
+  const d = apenasNumeros(cpf);
+  if (d.length !== 11) return false;
+  if (/^(\d)\1+$/.test(d)) return false;
+
+  const calc = (base: string, start: number): number => {
+    let sum = 0;
+    for (let i = 0; i < base.length; i++) sum += parseInt(base[i], 10) * (start - i);
+    const r = (sum * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  const dv1 = calc(d.slice(0, 9), 10);
+  const dv2 = calc(d.slice(0, 10), 11);
+  return d[9] === String(dv1) && d[10] === String(dv2);
+}
+
+/**
+ * Valida chave de acesso de NFe/NFCe/MDFe (44 dígitos + DV módulo 11).
+ */
+export function validarChaveAcesso(chave: string): boolean {
+  const d = apenasNumeros(chave);
+  if (d.length !== 44) return false;
+  return calcularDV(d.slice(0, 43)) === d[43];
 }

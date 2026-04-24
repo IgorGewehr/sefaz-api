@@ -18,6 +18,7 @@ const xmlParser = new XMLParser({
 // =====================================================
 
 const AGENT_CACHE_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const AGENT_CACHE_MAX = parseInt(process.env.AGENT_CACHE_MAX || '200', 10);
 
 interface AgentCacheEntry {
   agent: https.Agent;
@@ -62,7 +63,16 @@ function getOrCreateAgent(certificado: CertificateData): https.Agent {
     timeout: 45000,
   });
 
-  // Store in cache
+  // LRU: remove oldest entry if at capacity
+  if (agentCache.size >= AGENT_CACHE_MAX && !agentCache.has(key)) {
+    const oldestKey = agentCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      const old = agentCache.get(oldestKey);
+      old?.agent.destroy();
+      agentCache.delete(oldestKey);
+    }
+  }
+  agentCache.delete(key);
   agentCache.set(key, {
     agent,
     expiresAt: Date.now() + AGENT_CACHE_TTL_MS,

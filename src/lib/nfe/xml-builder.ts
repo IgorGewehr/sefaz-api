@@ -4,6 +4,7 @@
 
 import * as crypto from 'crypto';
 import { create } from 'xmlbuilder2';
+import { config } from '../../config';
 import type {
   NFeRequest,
   NFCeRequest,
@@ -934,10 +935,10 @@ export function buildNFeXml(
 
   // Responsável técnico (NT 2025.001 - obrigatório)
   nfeObj.NFe.infNFe['infRespTec'] = {
-    CNPJ: '65609793000196',
-    xContato: 'Igor de Oliveira Gewehr',
-    email: 'igor.gewehr1@gmail.com',
-    fone: '11954409958',
+    CNPJ: config.respTec.cnpj,
+    xContato: config.respTec.contato,
+    email: config.respTec.email,
+    fone: config.respTec.fone,
   };
 
   const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele(nfeObj);
@@ -1052,10 +1053,10 @@ export function buildNFCeXml(
 
   // Responsável técnico (NT 2025.001 - obrigatório)
   nfceObj.NFe.infNFe['infRespTec'] = {
-    CNPJ: '65609793000196',
-    xContato: 'Igor de Oliveira Gewehr',
-    email: 'igor.gewehr1@gmail.com',
-    fone: '11954409958',
+    CNPJ: config.respTec.cnpj,
+    xContato: config.respTec.contato,
+    email: config.respTec.email,
+    fone: config.respTec.fone,
   };
 
   const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele(nfceObj);

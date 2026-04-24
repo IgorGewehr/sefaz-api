@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import * as mdfeService from '../services/mdfe.service';
+import { validarCNPJ, validarChaveAcesso } from '../lib/utils';
 import type {
   MdfeRequest,
   MdfeEncerrarRequest,
@@ -16,6 +17,10 @@ router.post('/emitir', async (req: Request, res: Response) => {
 
     if (!data.emitente?.cnpj) {
       res.status(400).json({ error: 'emitente.cnpj é obrigatório' });
+      return;
+    }
+    if (!validarCNPJ(data.emitente.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do emitente inválido (DV incorreto)' });
       return;
     }
     if (!data.ufInicio || !data.ufFim) {
@@ -73,8 +78,8 @@ router.post('/consultar', async (req: Request, res: Response) => {
       ambiente?: 'producao' | 'homologacao';
     };
 
-    if (!chaveAcesso || chaveAcesso.length !== 44) {
-      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+    if (!chaveAcesso || !validarChaveAcesso(chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
       return;
     }
     if (!certificado?.pfxBase64 || !certificado?.password) {
@@ -95,7 +100,7 @@ router.post('/encerrar', async (req: Request, res: Response) => {
   try {
     const data: MdfeEncerrarRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
       res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
       return;
     }
@@ -126,7 +131,7 @@ router.post('/cancelar', async (req: Request, res: Response) => {
   try {
     const data: MdfeCancelarRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
       res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
       return;
     }

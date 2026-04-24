@@ -1,6 +1,9 @@
 import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { config } from './config';
-import { apiKeyAuth } from './middleware/auth';
+import { apiKeyAuth, adminKeyAuth } from './middleware/auth';
 import nfeRoutes from './routes/nfe.routes';
 import nfseRoutes from './routes/nfse.routes';
 import mdfeRoutes from './routes/mdfe.routes';
@@ -9,13 +12,31 @@ import documentationRoutes from './routes/documentation.routes';
 
 const app = express();
 
+// Headers de segurança
+app.use(helmet());
+
+// CORS — whitelist via CORS_ORIGINS (vazio = sem CORS)
+if (config.corsOrigins.length > 0) {
+  app.use(cors({ origin: config.corsOrigins, credentials: false }));
+}
+
 // Parse JSON bodies (max 2MB — certificados A1 são ~5KB em base64)
 app.use(express.json({ limit: '2mb' }));
+
+// Rate limit global: por IP + Authorization header
+const limiter = rateLimit({
+  windowMs: config.rateLimitWindowMs,
+  max: config.rateLimitMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.ip}:${req.headers.authorization || 'anon'}`,
+  message: { error: 'Rate limit excedido. Aguarde e tente novamente.' },
+});
 
 // Track metrics for all requests
 app.use(trackMetrics);
 
-// Health check (sem auth)
+// Health check (sem auth, sem rate limit)
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -23,12 +44,12 @@ app.get('/health', (_req, res) => {
 // Documentação pública (sem auth)
 app.use('/documentation', documentationRoutes);
 
-// Todas as rotas fiscais exigem API key
-app.use('/nfe', apiKeyAuth, nfeRoutes);
-app.use('/nfse', apiKeyAuth, nfseRoutes);
-app.use('/mdfe', apiKeyAuth, mdfeRoutes);
+// Todas as rotas fiscais exigem API key + rate limit
+app.use('/nfe', limiter, apiKeyAuth, nfeRoutes);
+app.use('/nfse', limiter, apiKeyAuth, nfseRoutes);
+app.use('/mdfe', limiter, apiKeyAuth, mdfeRoutes);
 
-// Metrics routes (protected)
+// Metrics (leitura com API key, reset exige admin key — montado dentro das rotas)
 app.use('/api/metrics', apiKeyAuth, metricsRoutes);
 
 // 404
@@ -38,18 +59,17 @@ app.use((_req, res) => {
 
 // Error handler global
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('[ERRO]', err);
+  console.error('[ERRO]', err?.message || err);
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
-app.listen(config.port, '0.0.0.0', () => {
-  console.log(`SEFAZ API rodando na porta ${config.port}`);
-  console.log(`Ambiente: ${config.sefazAmbiente}`);
-  console.log(`Endpoints:`);
-  console.log(`  NFe:  POST /nfe/emitir, /nfe/consultar, /nfe/cancelar, /nfe/carta-correcao, /nfe/inutilizar, /nfe/status`);
-  console.log(`  NFCe: POST /nfe/nfce/emitir`);
-  console.log(`  NFSe: POST /nfse/emitir, /nfse/lote, /nfse/consultar-lote, /nfse/consultar, /nfse/cancelar`);
-  console.log(`  MDFe: POST /mdfe/emitir, /mdfe/consultar, /mdfe/encerrar, /mdfe/cancelar, /mdfe/status`);
-});
+// Export para testes; só sobe servidor fora do vitest
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(config.port, '0.0.0.0', () => {
+    console.log(`SEFAZ API rodando na porta ${config.port}`);
+    console.log(`Ambiente: ${config.sefazAmbiente}`);
+  });
+}
 
+export { adminKeyAuth };
 export default app;

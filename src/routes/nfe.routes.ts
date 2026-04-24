@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import * as nfeService from '../services/nfe.service';
+import { validarCNPJ, validarCPF, validarChaveAcesso } from '../lib/utils';
 import type {
   NFeRequest,
   NFCeRequest,
@@ -19,6 +20,18 @@ router.post('/emitir', async (req: Request, res: Response) => {
 
     if (!data.emitente?.cnpj || !data.destinatario || !data.itens?.length) {
       res.status(400).json({ error: 'Campos obrigatórios: emitente, destinatario, itens' });
+      return;
+    }
+    if (!validarCNPJ(data.emitente.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do emitente inválido (DV incorreto)' });
+      return;
+    }
+    if (data.destinatario.cnpj && !validarCNPJ(data.destinatario.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do destinatário inválido (DV incorreto)' });
+      return;
+    }
+    if (data.destinatario.cpf && !validarCPF(data.destinatario.cpf)) {
+      res.status(400).json({ error: 'CPF do destinatário inválido (DV incorreto)' });
       return;
     }
     if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
@@ -52,6 +65,18 @@ router.post('/nfce/emitir', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Campos obrigatórios: emitente, itens' });
       return;
     }
+    if (!validarCNPJ(data.emitente.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do emitente inválido (DV incorreto)' });
+      return;
+    }
+    if (data.consumidor?.cnpj && !validarCNPJ(data.consumidor.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do consumidor inválido (DV incorreto)' });
+      return;
+    }
+    if (data.consumidor?.cpf && !validarCPF(data.consumidor.cpf)) {
+      res.status(400).json({ error: 'CPF do consumidor inválido (DV incorreto)' });
+      return;
+    }
     if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
       res.status(400).json({ error: 'Certificado digital (pfxBase64 + password) é obrigatório' });
       return;
@@ -83,8 +108,8 @@ router.post('/consultar', async (req: Request, res: Response) => {
   try {
     const data: NFeConsultaRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
-      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
       return;
     }
     if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
@@ -109,8 +134,8 @@ router.post('/cancelar', async (req: Request, res: Response) => {
   try {
     const data: NFeCancelarRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
-      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
       return;
     }
     if (!data.protocolo) {
@@ -144,8 +169,8 @@ router.post('/carta-correcao', async (req: Request, res: Response) => {
   try {
     const data: NFeCartaCorrecaoRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
-      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
       return;
     }
     if (!data.correcao || data.correcao.length < 15 || data.correcao.length > 1000) {
@@ -177,6 +202,10 @@ router.post('/inutilizar', async (req: Request, res: Response) => {
 
     if (!data.cnpj || !data.serie || !data.numeroInicial || !data.numeroFinal) {
       res.status(400).json({ error: 'Campos obrigatórios: cnpj, serie, numeroInicial, numeroFinal' });
+      return;
+    }
+    if (!validarCNPJ(data.cnpj)) {
+      res.status(400).json({ error: 'CNPJ inválido (DV incorreto)' });
       return;
     }
     if (!data.justificativa || data.justificativa.length < 15 || data.justificativa.length > 255) {

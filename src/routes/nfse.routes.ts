@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import * as nfseService from '../services/nfse.service';
+import { validarCNPJ, validarCPF } from '../lib/utils';
 import type {
   NfseEmitirRequest,
   NfseEnviarLoteRequest,
@@ -86,6 +87,20 @@ router.post('/emitir', async (req: Request, res: Response) => {
     const im   = body.prestador?.inscricaoMunicipal;
     if (!cnpj || !im) {
       res.status(400).json({ error: 'Campos obrigatórios: prestador.cnpj, prestador.inscricaoMunicipal' });
+      return;
+    }
+    if (!validarCNPJ(cnpj)) {
+      res.status(400).json({ error: 'CNPJ do prestador inválido (DV incorreto)' });
+      return;
+    }
+    const tomCnpj = body.tomador?.cnpj;
+    const tomCpf = body.tomador?.cpf;
+    if (tomCnpj && !validarCNPJ(tomCnpj)) {
+      res.status(400).json({ error: 'CNPJ do tomador inválido (DV incorreto)' });
+      return;
+    }
+    if (tomCpf && !validarCPF(tomCpf)) {
+      res.status(400).json({ error: 'CPF do tomador inválido (DV incorreto)' });
       return;
     }
     if (!body.tomador?.nome) {

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { adminKeyAuth } from '../middleware/auth';
 
 const router = Router();
 
@@ -300,7 +301,7 @@ router.get('/errors', (_req: Request, res: Response) => {
 // POST /api/metrics/reset - Reset metrics (admin only)
 // ===========================================================================
 
-router.post('/reset', (_req: Request, res: Response) => {
+router.post('/reset', adminKeyAuth, (_req: Request, res: Response) => {
   metrics.requests.total = 0;
   metrics.requests.success = 0;
   metrics.requests.error = 0;

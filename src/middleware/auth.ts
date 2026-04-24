@@ -2,6 +2,13 @@ import { timingSafeEqual } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 
+function safeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
 export function apiKeyAuth(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
 
@@ -16,12 +23,28 @@ export function apiKeyAuth(req: Request, res: Response, next: NextFunction): voi
     return;
   }
 
-  const tokenBuf = Buffer.from(token);
-  const keyBuf = Buffer.from(config.apiKey);
-  if (tokenBuf.length !== keyBuf.length || !timingSafeEqual(tokenBuf, keyBuf)) {
+  if (!safeEqual(token, config.apiKey!)) {
     res.status(403).json({ error: 'API key inválida' });
     return;
   }
 
+  next();
+}
+
+/**
+ * Requer header X-Admin-Key igual a config.adminKey.
+ * Usado em endpoints destrutivos (ex.: /metrics/reset). Se ADMIN_KEY não estiver
+ * configurada, o endpoint fica desabilitado (403).
+ */
+export function adminKeyAuth(req: Request, res: Response, next: NextFunction): void {
+  const adminKey = req.headers['x-admin-key'];
+  if (!config.adminKey) {
+    res.status(403).json({ error: 'Endpoint administrativo desabilitado (ADMIN_KEY não configurada)' });
+    return;
+  }
+  if (typeof adminKey !== 'string' || !safeEqual(adminKey, config.adminKey)) {
+    res.status(403).json({ error: 'Admin key inválida' });
+    return;
+  }
   next();
 }
