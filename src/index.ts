@@ -1,7 +1,7 @@
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { config } from './config';
 import { apiKeyAuth, adminKeyAuth } from './middleware/auth';
 import nfeRoutes from './routes/nfe.routes';
@@ -29,7 +29,9 @@ const limiter = rateLimit({
   max: config.rateLimitMax,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => `${req.ip}:${req.headers.authorization || 'anon'}`,
+  // ipKeyGenerator aplica o prefix correto pra IPv6 (/64 por default), evitando
+  // que múltiplos clientes no mesmo /64 compartilhem contador
+  keyGenerator: (req, res) => `${ipKeyGenerator(req.ip || '', false)}:${req.headers.authorization || 'anon'}`,
   message: { error: 'Rate limit excedido. Aguarde e tente novamente.' },
 });
 
