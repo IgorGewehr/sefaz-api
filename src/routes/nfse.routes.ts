@@ -80,7 +80,6 @@ function normalizeEmitirRequest(body: any): NfseEmitirRequest {
 router.post('/emitir', async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    console.log('[NFS-e][/emitir] Payload recebido:', JSON.stringify(body, null, 2));
 
     // Validação — aceita novo formato (numeroDPS/codigoTributacaoNacional) e legado (rps.*/codigoServico)
     const cnpj = body.prestador?.cnpj;
