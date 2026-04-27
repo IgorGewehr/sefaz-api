@@ -4,6 +4,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { pfxToBuffer } from '../utils';
 import type { CertificateData } from '../../types';
 import { logSoapRequest, logSoapResponse, logSoapError } from '../logger/soap-logger';
+import { assertClosed, recordSuccess, recordFailure } from './circuit-breaker';
 
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
@@ -18,6 +19,7 @@ const xmlParser = new XMLParser({
 // =====================================================
 
 const AGENT_CACHE_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const AGENT_CACHE_MAX = parseInt(process.env.AGENT_CACHE_MAX || '200', 10);
 
 interface AgentCacheEntry {
   agent: https.Agent;
@@ -62,7 +64,16 @@ function getOrCreateAgent(certificado: CertificateData): https.Agent {
     timeout: 45000,
   });
 
-  // Store in cache
+  // LRU: remove oldest entry if at capacity
+  if (agentCache.size >= AGENT_CACHE_MAX && !agentCache.has(key)) {
+    const oldestKey = agentCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      const old = agentCache.get(oldestKey);
+      old?.agent.destroy();
+      agentCache.delete(oldestKey);
+    }
+  }
+  agentCache.delete(key);
   agentCache.set(key, {
     agent,
     expiresAt: Date.now() + AGENT_CACHE_TTL_MS,
@@ -101,6 +112,14 @@ export async function enviarSoap(
   // Log request
   logSoapRequest(url, soapAction, xmlBody);
 
+  // Circuit breaker: falha rápido se o endpoint está degradado
+  try {
+    assertClosed(url);
+  } catch (err: any) {
+    logSoapError(url, soapAction, err, 0);
+    return Promise.reject(err);
+  }
+
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
 
@@ -136,12 +155,18 @@ export async function enviarSoap(
         const duration = Date.now() - startTime;
 
         if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-          // Log successful response
+          // 2xx → sucesso; limpa contador de falhas
+          recordSuccess(url);
           logSoapResponse(url, soapAction, res.statusCode, data, duration);
           resolve(data);
         } else {
-          // Log error response
           logSoapResponse(url, soapAction, res.statusCode || 500, data, duration);
+          // 4xx normalmente é erro de payload nosso; só conta como falha de infra se for 5xx
+          if (res.statusCode && res.statusCode >= 500) {
+            recordFailure(url);
+          } else {
+            recordSuccess(url);
+          }
           const error = new Error(`SEFAZ retornou status ${res.statusCode}: ${data.slice(0, 500)}`);
           logSoapError(url, soapAction, error, duration);
           reject(error);
@@ -151,6 +176,7 @@ export async function enviarSoap(
 
     req.on('error', (err) => {
       const duration = Date.now() - startTime;
+      recordFailure(url);
       const error = new Error(`Erro de conexão com SEFAZ: ${err.message}`);
       logSoapError(url, soapAction, error, duration);
       reject(error);
@@ -159,6 +185,7 @@ export async function enviarSoap(
     req.setTimeout(60000, () => {
       req.destroy();
       const duration = Date.now() - startTime;
+      recordFailure(url);
       const error = new Error('Timeout na conexão com SEFAZ (60s)');
       logSoapError(url, soapAction, error, duration);
       reject(error);

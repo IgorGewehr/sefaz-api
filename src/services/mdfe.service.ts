@@ -76,6 +76,7 @@ export async function emitirMdfe(request: MdfeRequest): Promise<SefazResponse> {
       numero,
       tipoEmissao: '1', // Normal
       codigoNumerico,
+      uf: request.ufInicio,
     });
 
     // Construir XML

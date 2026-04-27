@@ -1,5 +1,8 @@
 import { Router, Request, Response } from 'express';
 import * as nfeService from '../services/nfe.service';
+import { validarCNPJ, validarCPF, validarChaveAcesso, parsePfx, certCnpjBate } from '../lib/utils';
+import { config } from '../config';
+import type { CertificateData } from '../types';
 import type {
   NFeRequest,
   NFCeRequest,
@@ -12,6 +15,32 @@ import type {
 
 const router = Router();
 
+/**
+ * Retorna erro 400 se o CNPJ do certificado não bate com o CNPJ do emitente.
+ * Também captura PFX inválido / senha errada com mensagem clara (evita 500 genérico).
+ * Retorna `true` quando a checagem falhou (resposta já escrita).
+ */
+function certMismatch(res: Response, certificado: CertificateData, emitenteCnpj: string): boolean {
+  let parsed: ReturnType<typeof parsePfx>;
+  try {
+    parsed = parsePfx(certificado.pfxBase64, certificado.password);
+  } catch (err: any) {
+    res.status(400).json({ error: `Certificado inválido: ${err.message || 'não foi possível decodificar o PFX'}` });
+    return true;
+  }
+  if (parsed.notAfter.getTime() < Date.now()) {
+    res.status(400).json({ error: `Certificado expirado em ${parsed.notAfter.toISOString()}` });
+    return true;
+  }
+  if (config.validateCertCnpj && !certCnpjBate(parsed.cnpj, emitenteCnpj)) {
+    res.status(403).json({
+      error: 'CNPJ do certificado não corresponde ao CNPJ do emitente informado no payload',
+    });
+    return true;
+  }
+  return false;
+}
+
 // POST /nfe/emitir - Emitir NFe
 router.post('/emitir', async (req: Request, res: Response) => {
   try {
@@ -19,6 +48,18 @@ router.post('/emitir', async (req: Request, res: Response) => {
 
     if (!data.emitente?.cnpj || !data.destinatario || !data.itens?.length) {
       res.status(400).json({ error: 'Campos obrigatórios: emitente, destinatario, itens' });
+      return;
+    }
+    if (!validarCNPJ(data.emitente.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do emitente inválido (DV incorreto)' });
+      return;
+    }
+    if (data.destinatario.cnpj && !validarCNPJ(data.destinatario.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do destinatário inválido (DV incorreto)' });
+      return;
+    }
+    if (data.destinatario.cpf && !validarCPF(data.destinatario.cpf)) {
+      res.status(400).json({ error: 'CPF do destinatário inválido (DV incorreto)' });
       return;
     }
     if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
@@ -33,6 +74,7 @@ router.post('/emitir', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'numero da nota é obrigatório (sequencial, controlado pelo emissor)' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.emitente.cnpj)) return;
 
     const result = await nfeService.emitirNFe(data);
     const statusCode = result.success ? 200 : 422;
@@ -52,6 +94,18 @@ router.post('/nfce/emitir', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Campos obrigatórios: emitente, itens' });
       return;
     }
+    if (!validarCNPJ(data.emitente.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do emitente inválido (DV incorreto)' });
+      return;
+    }
+    if (data.consumidor?.cnpj && !validarCNPJ(data.consumidor.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do consumidor inválido (DV incorreto)' });
+      return;
+    }
+    if (data.consumidor?.cpf && !validarCPF(data.consumidor.cpf)) {
+      res.status(400).json({ error: 'CPF do consumidor inválido (DV incorreto)' });
+      return;
+    }
     if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
       res.status(400).json({ error: 'Certificado digital (pfxBase64 + password) é obrigatório' });
       return;
@@ -68,6 +122,7 @@ router.post('/nfce/emitir', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'numero da nota é obrigatório (sequencial, controlado pelo emissor)' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.emitente.cnpj)) return;
 
     const result = await nfeService.emitirNFCe(data);
     const statusCode = result.success ? 200 : 422;
@@ -83,8 +138,8 @@ router.post('/consultar', async (req: Request, res: Response) => {
   try {
     const data: NFeConsultaRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
-      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
       return;
     }
     if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
@@ -109,8 +164,8 @@ router.post('/cancelar', async (req: Request, res: Response) => {
   try {
     const data: NFeCancelarRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
-      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
       return;
     }
     if (!data.protocolo) {
@@ -129,6 +184,8 @@ router.post('/cancelar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'ufEmitente é obrigatório' });
       return;
     }
+    // CNPJ sai da chave de acesso (posições 6-19)
+    if (certMismatch(res, data.certificado, data.chaveAcesso.substring(6, 20))) return;
 
     const result = await nfeService.cancelarNFe(data);
     const statusCode = result.success ? 200 : 422;
@@ -144,8 +201,8 @@ router.post('/carta-correcao', async (req: Request, res: Response) => {
   try {
     const data: NFeCartaCorrecaoRequest = req.body;
 
-    if (!data.chaveAcesso || data.chaveAcesso.length !== 44) {
-      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
       return;
     }
     if (!data.correcao || data.correcao.length < 15 || data.correcao.length > 1000) {
@@ -160,6 +217,7 @@ router.post('/carta-correcao', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'ufEmitente é obrigatório' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.chaveAcesso.substring(6, 20))) return;
 
     const result = await nfeService.cartaCorrecao(data);
     const statusCode = result.success ? 200 : 422;
@@ -179,6 +237,10 @@ router.post('/inutilizar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Campos obrigatórios: cnpj, serie, numeroInicial, numeroFinal' });
       return;
     }
+    if (!validarCNPJ(data.cnpj)) {
+      res.status(400).json({ error: 'CNPJ inválido (DV incorreto)' });
+      return;
+    }
     if (!data.justificativa || data.justificativa.length < 15 || data.justificativa.length > 255) {
       res.status(400).json({ error: 'justificativa deve ter entre 15 e 255 caracteres' });
       return;
@@ -187,6 +249,7 @@ router.post('/inutilizar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Certificado digital é obrigatório' });
       return;
     }
+    if (certMismatch(res, data.certificado, data.cnpj)) return;
 
     const result = await nfeService.inutilizar(data);
     const statusCode = result.success ? 200 : 422;

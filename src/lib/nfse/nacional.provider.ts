@@ -41,14 +41,10 @@ async function httpRequest(
   certificado: CertificateData,
   body?: object,
 ): Promise<{ status: number; data: any; raw: string }> {
-  console.log(`[ADN] httpRequest ${method} ${url}`);
-
   let pfx: Buffer;
   try {
     pfx = pfxToBuffer(certificado.pfxBase64);
-    console.log(`[ADN] Certificado PFX decodificado (${pfx.length} bytes)`);
   } catch (err: any) {
-    console.error('[FATAL-ADN] Falha ao decodificar certificado PFX:', err);
     throw new Error(`Falha ao decodificar certificado PFX: ${err.message}`);
   }
 
@@ -60,20 +56,14 @@ async function httpRequest(
       rejectUnauthorized: false,
       minVersion: 'TLSv1.2',
     });
-    console.log('[ADN] Certificado carregado e Agent mTLS configurado com sucesso.');
   } catch (err: any) {
-    console.error('[FATAL-ADN] Falha ao criar https.Agent com certificado:', err);
     throw new Error(`Falha ao criar Agent mTLS: ${err.message}`);
   }
 
   let payload: string | undefined;
   try {
     payload = body ? JSON.stringify(body) : undefined;
-    if (payload) {
-      console.log(`[ADN] Payload JSON montado (${payload.length} chars)`);
-    }
   } catch (err: any) {
-    console.error('[FATAL-ADN] Falha ao serializar payload JSON:', err);
     throw new Error(`Falha ao serializar payload para JSON: ${err.message}`);
   }
 
@@ -358,26 +348,9 @@ export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): st
 // ============================================================
 
 function empacotarDps(xmlDps: string, certificado: CertificateData): string {
-  // Log do XML bruto ANTES de assinar/compactar
-  console.log('[ADN] XML Bruto (antes da assinatura):');
-  console.log(xmlDps);
-
-  // 1. Assinar a tag <infDPS>
-  console.log('[ADN] Assinando <infDPS>...');
   const xmlAssinado = assinarXml(xmlDps, certificado, 'infDPS');
-  console.log('[ADN] XML Assinado:');
-  console.log(xmlAssinado);
-
-  // 2. Compactar com GZip
-  console.log('[ADN] Compactando XML com GZip...');
   const gzipped = zlib.gzipSync(Buffer.from(xmlAssinado, 'utf-8'));
-  console.log(`[ADN] GZip concluído (${gzipped.length} bytes)`);
-
-  // 3. Converter para Base64
-  const base64 = gzipped.toString('base64');
-  console.log(`[ADN] Base64 gerado (${base64.length} chars)`);
-
-  return base64;
+  return gzipped.toString('base64');
 }
 
 // ============================================================
@@ -493,50 +466,30 @@ export class NacionalProvider implements INfseProvider {
 
   async emitir(request: NfseEmitirRequest): Promise<NfseResponse> {
     try {
-      console.log('[ADN] Iniciando emissão NFS-e via Padrão Nacional...');
-
-      // Validar
       const erros = validarDps(request);
       if (erros.length > 0) {
-        console.log(`[ADN] Validação falhou: ${erros.join('; ')}`);
         return { success: false, status: 'erro', mensagens: erros.map(e => ({ codigo: '0', mensagem: e })) };
       }
-      console.log('[ADN] Validação OK');
 
-      // Auto-preenche cTribNac
       if (request.servico && !request.servico.codigoTributacaoNacional && request.servico.codigoServico) {
         request.servico.codigoTributacaoNacional = request.servico.codigoServico.replace(/\D/g, '').padEnd(6, '0');
-        console.log(`[ADN] cTribNac auto-preenchido: ${request.servico.codigoTributacaoNacional}`);
       }
 
-      // 1. Construir XML do DPS
-      console.log('[ADN] Construindo XML do DPS...');
       const xmlDps = buildDpsXml(request);
-      console.log(`[ADN] XML DPS construído (${xmlDps.length} chars)`);
-
-      // 2. Assinar + GZip + Base64
       const dpsXmlGZipB64 = empacotarDps(xmlDps, request.certificado);
 
-      // 3. POST { dpsXmlGZipB64 } via mTLS
       const endpoints = getAdnEndpoints(config.sefazAmbiente);
-      console.log(`[ADN] Endpoint emissão: ${endpoints.emitir}`);
 
-      const { status, data, raw } = await httpRequest(
+      const { status, data } = await httpRequest(
         'POST',
         endpoints.emitir,
         request.certificado,
         { dpsXmlGZipB64 },
       );
-      console.log(`[ADN] Resposta recebida: HTTP ${status}`);
-
-      if (status >= 400) {
-        console.error(`[ADN] Detalhes da rejeição do Governo (HTTP ${status}):`, JSON.stringify(data, null, 2));
-        console.error(`[ADN] Body bruto:`, raw.slice(0, 2000));
-      }
 
       return parseEmitirResponse(status, data);
     } catch (error: any) {
-      console.error('[FATAL-ADN] Falha interna:', error);
+      console.error('[ADN] Falha interna ao emitir:', error.message);
       return {
         success: false,
         status: 'erro',

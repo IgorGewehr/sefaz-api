@@ -20,7 +20,7 @@ import type {
 } from '../../types/nfse';
 import { assinarXml } from '../sefaz/xml-signer';
 import { extrairBodySoap } from '../sefaz/soap-client';
-import { apenasNumeros, formatarValor } from '../utils';
+import { apenasNumeros, formatarValor, escapeXml } from '../utils';
 import { logSoapRequest, logSoapResponse, logSoapError } from '../logger/soap-logger';
 
 // ============================================================
@@ -97,12 +97,12 @@ function buildInfDeclaracaoXml(request: NfseEmitirRequest): string {
     if (request.tomador.endereco) {
       const e = request.tomador.endereco;
       endTomador = '<Endereco>' +
-        `<Endereco>${e.logradouro || ''}</Endereco>` +
-        `<Numero>${e.numero || 'SN'}</Numero>` +
-        (e.complemento ? `<Complemento>${e.complemento}</Complemento>` : '') +
-        `<Bairro>${e.bairro || ''}</Bairro>` +
-        `<CodigoMunicipio>${e.codigoMunicipio}</CodigoMunicipio>` +
-        `<Uf>${e.uf}</Uf>` +
+        `<Endereco>${escapeXml(e.logradouro || '')}</Endereco>` +
+        `<Numero>${escapeXml(e.numero || 'SN')}</Numero>` +
+        (e.complemento ? `<Complemento>${escapeXml(e.complemento)}</Complemento>` : '') +
+        `<Bairro>${escapeXml(e.bairro || '')}</Bairro>` +
+        `<CodigoMunicipio>${apenasNumeros(e.codigoMunicipio)}</CodigoMunicipio>` +
+        `<Uf>${escapeXml(e.uf)}</Uf>` +
         `<Cep>${apenasNumeros(e.cep)}</Cep>` +
         '</Endereco>';
     }
@@ -110,10 +110,10 @@ function buildInfDeclaracaoXml(request: NfseEmitirRequest): string {
     if (request.tomador.contato?.email || request.tomador.contato?.telefone) {
       contatoTomador = '<Contato>' +
         (request.tomador.contato.telefone ? `<Telefone>${apenasNumeros(request.tomador.contato.telefone)}</Telefone>` : '') +
-        (request.tomador.contato.email ? `<Email>${request.tomador.contato.email}</Email>` : '') +
+        (request.tomador.contato.email ? `<Email>${escapeXml(request.tomador.contato.email)}</Email>` : '') +
         '</Contato>';
     }
-    tomadorXml = `<Tomador>${idTomador}<RazaoSocial>${request.tomador.nome}</RazaoSocial>${endTomador}${contatoTomador}</Tomador>`;
+    tomadorXml = `<Tomador>${idTomador}<RazaoSocial>${escapeXml(request.tomador.nome)}</RazaoSocial>${endTomador}${contatoTomador}</Tomador>`;
   }
 
   const regimeEsp = request.prestador.regimeEspecialTributacao || (isSimples ? '6' : '');
@@ -151,7 +151,7 @@ function buildInfDeclaracaoXml(request: NfseEmitirRequest): string {
       `<ItemListaServico>${itemLista}</ItemListaServico>` +
       (request.servico.cnae ? `<CodigoCnae>${request.servico.cnae}</CodigoCnae>` : '') +
       (request.servico.codigoTributacaoMunicipio ? `<CodigoTributacaoMunicipio>${request.servico.codigoTributacaoMunicipio}</CodigoTributacaoMunicipio>` : '') +
-      `<Discriminacao>${request.servico.discriminacao}</Discriminacao>` +
+      `<Discriminacao>${escapeXml(request.servico.discriminacao)}</Discriminacao>` +
       `<CodigoMunicipio>${request.servico.codigoMunicipioPrestacao}</CodigoMunicipio>` +
       `<ExigibilidadeISS>${exigibilidade}</ExigibilidadeISS>` +
       (request.servico.codigoMunicipioIncidencia ? `<MunicipioIncidencia>${request.servico.codigoMunicipioIncidencia}</MunicipioIncidencia>` : '') +

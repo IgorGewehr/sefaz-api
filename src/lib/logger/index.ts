@@ -118,11 +118,20 @@ function sanitize(data: unknown): unknown {
 
       // Check if field is sensitive
       if (SENSITIVE_FIELDS.some(field => lowerKey.includes(field.toLowerCase()))) {
-        if (typeof value === 'string' && value.length > 8) {
-          // Show only first 4 characters for API keys
-          sanitized[key] = lowerKey.includes('key') || lowerKey.includes('token')
-            ? `${value.substring(0, 4)}...`
-            : '[REDACTED]';
+        // PFX/cert/private-key: fully redacted. Never emit any bytes.
+        const fullyRedact =
+          lowerKey.includes('pfx') ||
+          lowerKey.includes('password') ||
+          lowerKey.includes('passphrase') ||
+          lowerKey.includes('privatekey') ||
+          lowerKey.includes('private_key') ||
+          lowerKey === 'certificate';
+
+        if (fullyRedact) {
+          sanitized[key] = '[REDACTED]';
+        } else if (typeof value === 'string' && value.length > 8) {
+          // Show only first 4 chars for api keys / tokens / bearer (helps correlation)
+          sanitized[key] = `${value.substring(0, 4)}...`;
         } else {
           sanitized[key] = '[REDACTED]';
         }

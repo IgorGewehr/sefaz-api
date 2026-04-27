@@ -468,6 +468,7 @@ function gerarChaveENumero(params: {
     numero,
     tipoEmissao: '1',
     codigoNumerico,
+    uf: ufEmitente,
   });
 
   return { chaveAcesso, numero, codigoNumerico };
