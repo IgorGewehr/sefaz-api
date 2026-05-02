@@ -92,7 +92,7 @@ export async function enviarSoap(
   soapAction: string,
   xmlBody: string,
   certificado: CertificateData,
-  soapVersion: '1.1' | '1.2' = '1.1',
+  soapVersion: '1.1' | '1.2' = '1.2',
 ): Promise<string> {
   const startTime = Date.now();
 
