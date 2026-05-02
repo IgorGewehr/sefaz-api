@@ -572,7 +572,10 @@ function buildEmitenteGroup(emitente: NFeEmitente): Record<string, any> {
 
   Object.assign(emit, buildEnderecoGroup(emitente.endereco, 'enderEmit'));
 
-  emit['IE'] = apenasNumeros(emitente.inscricaoEstadual);
+  // IE: aceita "ISENTO" (literal) ou apenas dígitos (TIeEmi: ISENTO|[0-9]{2,14})
+  emit['IE'] = String(emitente.inscricaoEstadual).trim().toUpperCase() === 'ISENTO'
+    ? 'ISENTO'
+    : apenasNumeros(emitente.inscricaoEstadual);
 
   if (emitente.inscricaoMunicipal) {
     emit['IM'] = emitente.inscricaoMunicipal;
