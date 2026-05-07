@@ -80,6 +80,13 @@ enum AuditOperation {
   STORAGE_WRITE
 }
 
+enum SpedJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 // ----- MODELS -----
 
 model Tenant {
@@ -99,6 +106,7 @@ model Tenant {
   webhookDeliveries WebhookDelivery[]
   usage        UsageRecord[]
   auditLogs    AuditLog[]
+  spedJobs     SpedJob[]
 
   @@index([email])
   @@map("tenants")
@@ -274,6 +282,36 @@ model AuditLog {
   @@index([tenantId, operation])
   @@index([tenantId, resourceId])
   @@map("audit_logs")
+}
+
+model SpedJob {
+  id           String         @id @default(cuid())
+  tenantId     String         @map("tenant_id")
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Period being reported (YYYY-MM)
+  period       String
+
+  status       SpedJobStatus  @default(QUEUED)
+  errorMessage String?        @map("error_message")
+
+  // Inputs (resolved at queue time, frozen for reproducibility)
+  taxRegime    String         @map("tax_regime")
+  emitter      Json
+  invoiceCount Int            @default(0) @map("invoice_count")
+
+  // Output
+  storagePath  String?        @map("storage_path")
+  fileSize     Int?           @map("file_size")
+  layoutVersion String?       @map("layout_version")
+
+  startedAt    DateTime?      @map("started_at")
+  finishedAt   DateTime?      @map("finished_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  @@index([tenantId, status])
+  @@index([tenantId, period])
+  @@map("sped_jobs")
 }
 
 model UsageRecord {

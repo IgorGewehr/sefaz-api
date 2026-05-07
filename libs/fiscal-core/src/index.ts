@@ -6,3 +6,7 @@ export * from './util/pfx';
 export * from './nfe/xml-builder';
 export * from './nfe/orchestration';
 export * from './mdfe/xml-builder';
+export * from './danfe/danfe-generator';
+export * from './sped/sped-generator';
+export * from './sped/types';
+export * from './sped/adapter';

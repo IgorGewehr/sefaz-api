@@ -11,10 +11,12 @@ import { StorageModule } from '@app/storage';
 import { SefazModule } from '@app/sefaz';
 
 import { WebhookProcessor } from './processors/webhook.processor';
+import { SpedProcessor } from './processors/sped.processor';
 import { CertExpiryJob } from './jobs/cert-expiry.job';
 import { SefazReconciliationJob } from './jobs/sefaz-reconciliation.job';
 
 const WEBHOOK_QUEUE = 'webhook-deliveries';
+const SPED_QUEUE = 'sped-jobs';
 
 @Module({
   imports: [
@@ -23,7 +25,7 @@ const WEBHOOK_QUEUE = 'webhook-deliveries';
     BullModule.forRoot({
       connection: { url: process.env.REDIS_URL ?? 'redis://localhost:6379' },
     }),
-    BullModule.registerQueue({ name: WEBHOOK_QUEUE }),
+    BullModule.registerQueue({ name: WEBHOOK_QUEUE }, { name: SPED_QUEUE }),
 
     CommonModule,
     PrismaModule,
@@ -32,6 +34,6 @@ const WEBHOOK_QUEUE = 'webhook-deliveries';
     StorageModule,
     SefazModule,
   ],
-  providers: [WebhookProcessor, CertExpiryJob, SefazReconciliationJob],
+  providers: [WebhookProcessor, SpedProcessor, CertExpiryJob, SefazReconciliationJob],
 })
 export class WorkerModule {}

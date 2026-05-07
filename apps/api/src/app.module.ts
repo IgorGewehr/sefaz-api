@@ -27,6 +27,7 @@ import { NfceModule } from './modules/nfce/nfce.module';
 import { MdfeModule } from './modules/mdfe/mdfe.module';
 import { NfseModule } from './modules/nfse/nfse.module';
 import { DanfeModule } from './modules/danfe/danfe.module';
+import { SpedModule } from './modules/sped/sped.module';
 import { StorageProxyModule } from './modules/storage-proxy/storage-proxy.module';
 
 @Module({
@@ -66,6 +67,7 @@ import { StorageProxyModule } from './modules/storage-proxy/storage-proxy.module
     MdfeModule,
     NfseModule,
     DanfeModule,
+    SpedModule,
     StorageProxyModule,
   ],
   controllers: [HealthController],
