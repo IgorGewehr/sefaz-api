@@ -1,6 +1,47 @@
-node_modules
-dist
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build
+dist/
+build/
+*.tsbuildinfo
+
+# env
 .env
-certs/*.pfx
-certs/*.p12
+.env.local
+.env.*.local
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# logs
+logs/
 *.log
+npm-debug.log*
+
+# test
+coverage/
+.nyc_output/
+
+# prisma
+prisma/migrations/dev.db*
+
+# storage local (dev)
+.storage/
+.uploads/
+
+# certs (dev only — never commit real PFX)
+*.pfx
+*.p12
+*.pem
+*.key
+!**/test/fixtures/*.pem

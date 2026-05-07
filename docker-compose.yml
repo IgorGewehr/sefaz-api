@@ -1,34 +1,56 @@
 services:
-  sefaz-api:
-    build: .
+  postgres:
+    image: postgres:16-alpine
+    container_name: sefaz-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sefaz
+      POSTGRES_PASSWORD: sefaz
+      POSTGRES_DB: sefaz
     ports:
-      - "3333:3333"
+      - "5432:5432"
     volumes:
-      - certs-data:/app/certs
-    env_file:
-      - .env
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1024m
-          cpus: "1.0"
-        reservations:
-          memory: 128m
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sefaz -d sefaz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
-    depends_on:
-      - sefaz-api
+  redis:
+    image: redis:7-alpine
+    container_name: sefaz-redis
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128m
-          cpus: "0.5"
-        reservations:
-          memory: 32m
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: sefaz-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: kms,s3
+      DEFAULT_REGION: sa-east-1
+      DEBUG: 0
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
-  certs-data:
+  postgres-data:
+  redis-data:
+  localstack-data:

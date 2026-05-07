@@ -1,0 +1,300 @@
+// =====================================================================
+// sefaz-api — Postgres schema (Prisma)
+// Multi-tenant fiscal SaaS engine. RLS enabled on tenant-scoped tables
+// via raw SQL after migration (see prisma/sql/rls.sql).
+// =====================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----- ENUMS -----
+
+enum Plan {
+  FREE
+  STARTER
+  GROWTH
+  SCALE
+  ENTERPRISE
+}
+
+enum InvoiceType {
+  NFE
+  NFCE
+  NFSE
+  MDFE
+  CTE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  PENDING
+  PROCESSING
+  AUTHORIZED
+  REJECTED
+  CANCELLED
+  DENIED
+}
+
+enum Environment {
+  PRODUCTION
+  HOMOLOGATION
+}
+
+enum WebhookEvent {
+  INVOICE_AUTHORIZED
+  INVOICE_REJECTED
+  INVOICE_CANCELLED
+  SPED_READY
+  CERTIFICATE_EXPIRING
+  CERTIFICATE_EXPIRED
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  RETRYING
+}
+
+enum AuditOperation {
+  TENANT_CREATE
+  API_KEY_CREATE
+  API_KEY_REVOKE
+  CERT_UPLOAD
+  CERT_DELETE
+  CERT_USE_SIGN
+  INVOICE_EMIT
+  INVOICE_CANCEL
+  INVOICE_QUERY
+  WEBHOOK_REGISTER
+  WEBHOOK_DELIVER
+  SPED_GENERATE
+  STORAGE_READ
+  STORAGE_WRITE
+}
+
+// ----- MODELS -----
+
+model Tenant {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  plan         Plan          @default(FREE)
+  metadata     Json?
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  deletedAt    DateTime?     @map("deleted_at")
+
+  apiKeys      ApiKey[]
+  certificates Certificate[]
+  invoices     Invoice[]
+  webhooks     Webhook[]
+  webhookDeliveries WebhookDelivery[]
+  usage        UsageRecord[]
+  auditLogs    AuditLog[]
+
+  @@index([email])
+  @@map("tenants")
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  tenantId   String    @map("tenant_id")
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Hash sha256(apiKey). The plaintext is shown only on creation.
+  keyHash    String    @unique @map("key_hash")
+  // Display-only prefix shown to the user (e.g. "sk_live_abc...").
+  prefix     String
+  label      String
+  scopes     String[]  @default([])
+  lastUsedAt DateTime? @map("last_used_at")
+  expiresAt  DateTime? @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+model Certificate {
+  id                String    @id @default(cuid())
+  tenantId          String    @map("tenant_id")
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Envelope encryption
+  // encryptedPfx = AES-256-GCM(pfx, dek) — iv prepended, tag suffixed
+  encryptedPfx      Bytes     @map("encrypted_pfx")
+  // edek = KMS.encrypt(dek) — opaque to app
+  edek              Bytes
+  // KMS.encrypt(password)
+  encryptedPassword Bytes     @map("encrypted_password")
+
+  // Metadata extracted at upload time (cleartext, no secrets)
+  cnpj              String
+  subject           String
+  issuer            String
+  serialNumber      String    @map("serial_number")
+  notBefore         DateTime  @map("not_before")
+  expiresAt         DateTime  @map("expires_at")
+
+  // Soft delete (LGPD: hard-delete bytes, keep metadata for audit trail)
+  deletedAt         DateTime? @map("deleted_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([tenantId, deletedAt])
+  @@index([cnpj])
+  @@index([expiresAt])
+  @@map("certificates")
+}
+
+model Invoice {
+  id              String         @id @default(cuid())
+  tenantId        String         @map("tenant_id")
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  type            InvoiceType
+  status          InvoiceStatus  @default(DRAFT)
+  statusMessage   String?        @map("status_message")
+
+  // SEFAZ identifiers
+  series          Int
+  number          Int
+  accessKey       String?        @unique @map("access_key")
+  protocol        String?
+  receipt         String?        // nRec for async polling
+
+  environment     Environment
+  ufEmitter       String         @map("uf_emitter") @db.VarChar(2)
+
+  // Issuer + recipient + items + totals — JSONB for flexibility across types
+  issuer          Json
+  recipient       Json
+  items           Json
+  totals          Json
+  payment         Json?
+  metadata        Json?
+
+  // Storage refs (paths in Storage backend)
+  xmlStoragePath       String?  @map("xml_storage_path")
+  signedXmlStoragePath String?  @map("signed_xml_storage_path")
+  danfeStoragePath     String?  @map("danfe_storage_path")
+  cancelXmlPath        String?  @map("cancel_xml_path")
+
+  // Lifecycle
+  authorizedAt    DateTime?      @map("authorized_at")
+  cancelledAt     DateTime?      @map("cancelled_at")
+  cancelReason    String?        @map("cancel_reason")
+
+  // Idempotency for client retries (POST /v1/invoices)
+  idempotencyKey  String?        @map("idempotency_key")
+
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  @@unique([tenantId, idempotencyKey])
+  @@unique([tenantId, type, series, number])
+  @@index([tenantId, status])
+  @@index([tenantId, type, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([accessKey])
+  @@map("invoices")
+}
+
+model Webhook {
+  id           String     @id @default(cuid())
+  tenantId     String     @map("tenant_id")
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  url          String
+  events       WebhookEvent[]
+  // HMAC SHA-256 secret used to sign payloads (stored cleartext — rotate on regen)
+  secret       String
+  active       Boolean    @default(true)
+  description  String?
+
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  deliveries   WebhookDelivery[]
+
+  @@index([tenantId])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id           String                 @id @default(cuid())
+  tenantId     String                 @map("tenant_id")
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  webhookId    String                 @map("webhook_id")
+  webhook      Webhook                @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  event        WebhookEvent
+  payload      Json
+  status       WebhookDeliveryStatus  @default(PENDING)
+
+  attempts     Int                    @default(0)
+  responseCode Int?                   @map("response_code")
+  responseBody String?                @map("response_body") @db.Text
+  errorMessage String?                @map("error_message")
+  nextAttemptAt DateTime?             @map("next_attempt_at")
+  deliveredAt  DateTime?              @map("delivered_at")
+
+  createdAt    DateTime               @default(now()) @map("created_at")
+
+  @@index([tenantId, status])
+  @@index([webhookId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+model AuditLog {
+  id         String         @id @default(cuid())
+  tenantId   String         @map("tenant_id")
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  operation  AuditOperation
+  resourceId String?        @map("resource_id")
+  ipAddress  String?        @map("ip_address")
+  userAgent  String?        @map("user_agent")
+  apiKeyId   String?        @map("api_key_id")
+  metadata   Json?
+
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, operation])
+  @@index([tenantId, resourceId])
+  @@map("audit_logs")
+}
+
+model UsageRecord {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // YYYY-MM
+  period      String
+
+  invoicesNfe   Int    @default(0) @map("invoices_nfe")
+  invoicesNfce  Int    @default(0) @map("invoices_nfce")
+  invoicesNfse  Int    @default(0) @map("invoices_nfse")
+  invoicesMdfe  Int    @default(0) @map("invoices_mdfe")
+  danfes        Int    @default(0)
+  spedJobs      Int    @default(0) @map("sped_jobs")
+  webhookDeliveries Int @default(0) @map("webhook_deliveries")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, period])
+  @@map("usage_records")
+}
