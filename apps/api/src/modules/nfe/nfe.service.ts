@@ -1,37 +1,58 @@
-import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Invoice, InvoiceStatus, InvoiceType, Environment } from '@prisma/client';
+import {
+  Environment,
+  Invoice,
+  InvoiceStatus,
+  InvoiceType,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '@app/database';
 import { StorageService } from '@app/storage';
 import { SoapClientService, XmlSignerService, getNFeEndpoints } from '@app/sefaz';
 import {
+  buildEventoCancelamentoXml,
+  buildEventoCCeXml,
+  buildNfeProcEnvelope,
   buildNFeXml,
   gerarCodigoNumerico,
+  gerarIdLote,
   montarChaveAcesso,
+  parseRetAutorizacao,
+  parseRetEvento,
+  SOAP_ACTION_AUTORIZACAO,
+  SOAP_ACTION_EVENTO,
+  SOAP_ACTION_RET_AUTORIZACAO,
   UF_CODES,
+  validateNFePayload,
+  wrapConsReciNFe,
+  wrapEnviNFe,
+  wrapEventoSoap,
   type NFeRequest,
   type RespTec,
+  type SefazResponse,
 } from '@app/fiscal-core';
+import { SefazError } from '@app/common';
 import { CertificateService } from '../certificate/certificate.service';
 import { AuditService } from '../audit/audit.service';
+import { WebhookService } from '../webhook/webhook.service';
 
 interface EmitContext {
   tenantId: string;
   idempotencyKey?: string;
 }
 
+const POLLING_MAX_ATTEMPTS = 10;
+const POLLING_INTERVAL_MS = 3_000;
+
 /**
- * NFe orchestration. End-to-end flow on the happy path:
- *   1. Decrypt the tenant cert (envelope encryption + KMS).
- *   2. Build XML, sign with SHA-1 (SVRS rejects SHA-256 — code 225).
- *   3. POST to NFeAutorizacao4 (SOAP 1.2, mTLS, keep-alive).
- *   4. Persist Invoice + signed XML in storage.
- *   5. Audit + emit `invoice.authorized` webhook.
+ * NFe orchestration. End-to-end:
+ *   validate → resolve cert → build XML → sign → enviNFe → SOAP send →
+ *   parse retorno (and poll retAutorizacao if processando) → persist final
+ *   status with `nfeProc` envelope in storage → audit + dispatch webhook.
  *
- * The async polling / cancel / CC-e / inutilization paths are scaffolded but
- * delegated to the SEFAZ orchestration module that lives in `legacy/services/`
- * and is being ported lib-by-lib. Until the porting completes we persist as
- * PENDING and let the worker reconcile.
+ * The cert is decrypted from KMS only for the duration of the call. The
+ * Invoice row goes through PROCESSING → AUTHORIZED|REJECTED|DENIED.
  */
 @Injectable()
 export class NfeService {
@@ -45,6 +66,7 @@ export class NfeService {
     private readonly signer: XmlSignerService,
     private readonly certs: CertificateService,
     private readonly audit: AuditService,
+    private readonly webhooks: WebhookService,
     private readonly config: ConfigService,
   ) {
     this.respTec = {
@@ -57,9 +79,12 @@ export class NfeService {
 
   async emit(ctx: EmitContext, payload: Record<string, unknown>): Promise<Invoice> {
     const request = payload as unknown as NFeRequest;
-    const ufEmitente = request.ufEmitente?.toUpperCase();
-    const cUF = ufEmitente ? UF_CODES[ufEmitente] : undefined;
-    if (!cUF) throw new Error(`UF inválida: ${request.ufEmitente}`);
+    const errors = validateNFePayload(request);
+    if (errors.length > 0) throw new BadRequestException({ code: 'invalid_payload', errors });
+
+    const ufEmitente = request.ufEmitente.toUpperCase();
+    const cUF = UF_CODES[ufEmitente];
+    if (!cUF) throw new BadRequestException(`UF inválida: ${request.ufEmitente}`);
 
     const cert = await this.certs.resolveForEmitter(ctx.tenantId, request.emitente.cnpj);
     const ambiente: Environment =
@@ -84,7 +109,7 @@ export class NfeService {
     const decrypted = await this.certs.decrypt(ctx.tenantId, cert.id, {
       metadata: { chaveAcesso, kind: 'NFE_EMIT' },
     });
-    const signed = this.signer.signEnvelope(xml, decrypted, 'infNFe');
+    const signedXml = this.signer.signEnvelope(xml, decrypted, 'infNFe');
 
     const invoice = await this.prisma.asPrivileged().invoice.create({
       data: {
@@ -96,43 +121,308 @@ export class NfeService {
         accessKey: chaveAcesso,
         environment: ambiente,
         ufEmitter: ufEmitente,
-        issuer: request.emitente as never,
-        recipient: request.destinatario as never,
-        items: request.itens as never,
-        totals: {} as never,
-        payment: request.pagamento as never,
+        issuer: request.emitente as unknown as Prisma.InputJsonValue,
+        recipient: request.destinatario as unknown as Prisma.InputJsonValue,
+        items: request.itens as unknown as Prisma.InputJsonValue,
+        totals: {} as Prisma.InputJsonValue,
+        payment: request.pagamento as unknown as Prisma.InputJsonValue,
         idempotencyKey: ctx.idempotencyKey,
       },
     });
 
-    const xmlKey = StorageService.keyFor({
+    const signedKey = StorageService.keyFor({
       tenantId: ctx.tenantId,
       invoiceId: invoice.id,
       kind: 'signed-xml',
     });
-    await this.storage.put(xmlKey, Buffer.from(signed, 'utf8'), 'application/xml');
+    await this.storage.put(signedKey, Buffer.from(signedXml, 'utf8'), 'application/xml');
 
-    // TODO: dispatch to SEFAZ NFeAutorizacao4 + poll retAutorizacao + parse
-    //       protocol, then update status to AUTHORIZED. Endpoint resolution
-    //       already wired below for when the orchestration is finished.
     const endpoints = getNFeEndpoints(ufEmitente, ambiente === 'PRODUCTION' ? 'producao' : 'homologacao');
-    this.logger.debug(`Endpoints resolved for ${ufEmitente}/${ambiente}: ${endpoints.autorizacao}`);
+
+    let resultado: SefazResponse;
+    try {
+      const soapBody = wrapEnviNFe(signedXml, gerarIdLote(), '1');
+      const soapResponse = await this.soap.send(
+        endpoints.autorizacao,
+        SOAP_ACTION_AUTORIZACAO,
+        soapBody,
+        decrypted,
+      );
+      resultado = await this.parseAndMaybePoll(soapResponse, ufEmitente, ambiente, decrypted);
+    } catch (err) {
+      await this.audit.record('INVOICE_EMIT', {
+        tenantId: ctx.tenantId,
+        resourceId: invoice.id,
+        metadata: { type: InvoiceType.NFE, accessKey: chaveAcesso, error: (err as Error).message },
+      });
+      await this.prisma.asPrivileged().invoice.update({
+        where: { id: invoice.id },
+        data: {
+          status: InvoiceStatus.REJECTED,
+          statusMessage: `SEFAZ unreachable: ${(err as Error).message}`,
+          signedXmlStoragePath: signedKey,
+        },
+      });
+      throw new SefazError((err as Error).message);
+    }
+
+    const finalStatus = mapSefazStatus(resultado.status);
+    const accessKey = resultado.chaveAcesso ?? chaveAcesso;
+    const proc = resultado.success ? buildNfeProcEnvelope(signedXml, { ...resultado, chaveAcesso: accessKey }, tpAmb) : undefined;
+
+    let procKey: string | undefined;
+    if (proc) {
+      procKey = StorageService.keyFor({ tenantId: ctx.tenantId, invoiceId: invoice.id, kind: 'xml' });
+      await this.storage.put(procKey, Buffer.from(proc, 'utf8'), 'application/xml');
+    }
+
+    const updated = await this.prisma.asPrivileged().invoice.update({
+      where: { id: invoice.id },
+      data: {
+        status: finalStatus,
+        statusMessage: `${resultado.codigoStatus}: ${resultado.motivoStatus}`,
+        protocol: resultado.protocolo ?? null,
+        receipt: resultado.nRec ?? null,
+        accessKey,
+        signedXmlStoragePath: signedKey,
+        xmlStoragePath: procKey ?? null,
+        authorizedAt: resultado.success ? new Date(resultado.dataRecebimento || Date.now()) : null,
+      },
+    });
 
     await this.audit.record('INVOICE_EMIT', {
       tenantId: ctx.tenantId,
       resourceId: invoice.id,
-      metadata: { type: InvoiceType.NFE, accessKey: chaveAcesso },
+      metadata: {
+        type: InvoiceType.NFE,
+        accessKey,
+        status: finalStatus,
+        cStat: resultado.codigoStatus,
+        protocolo: resultado.protocolo,
+      },
     });
 
-    return this.prisma.asPrivileged().invoice.update({
-      where: { id: invoice.id },
-      data: { signedXmlStoragePath: xmlKey, status: InvoiceStatus.PENDING },
+    if (finalStatus === InvoiceStatus.AUTHORIZED) {
+      await this.webhooks.dispatch(ctx.tenantId, 'INVOICE_AUTHORIZED', {
+        invoiceId: invoice.id,
+        accessKey,
+        protocol: resultado.protocolo,
+      } as Prisma.InputJsonValue);
+    } else if (finalStatus === InvoiceStatus.REJECTED || finalStatus === InvoiceStatus.DENIED) {
+      await this.webhooks.dispatch(ctx.tenantId, 'INVOICE_REJECTED', {
+        invoiceId: invoice.id,
+        accessKey,
+        cStat: resultado.codigoStatus,
+        motivo: resultado.motivoStatus,
+      } as Prisma.InputJsonValue);
+    }
+
+    return updated;
+  }
+
+  async cancel(
+    ctx: { tenantId: string },
+    invoice: Invoice,
+    reason: string,
+  ): Promise<Invoice> {
+    if (!invoice.accessKey || !invoice.protocol) {
+      throw new BadRequestException('Invoice sem accessKey/protocolo — emissão não autorizada');
+    }
+    if (reason.length < 15 || reason.length > 255) {
+      throw new BadRequestException('Justificativa deve ter entre 15 e 255 caracteres');
+    }
+
+    const ambiente = invoice.environment;
+    const tpAmb = ambiente === 'PRODUCTION' ? '1' : '2';
+    const cert = await this.certs.resolveForEmitter(
+      ctx.tenantId,
+      (invoice.issuer as { cnpj?: string } | null)?.cnpj ?? '',
+    );
+    const decrypted = await this.certs.decrypt(ctx.tenantId, cert.id, {
+      metadata: { chaveAcesso: invoice.accessKey, kind: 'NFE_CANCEL' },
+    });
+
+    const eventoXml = buildEventoCancelamentoXml({
+      chaveAcesso: invoice.accessKey,
+      protocolo: invoice.protocol,
+      justificativa: reason,
+      ufEmitente: invoice.ufEmitter,
+      tpAmb,
+      loteId: gerarIdLote(),
+    });
+    const signed = this.signer.signEvent(eventoXml, decrypted);
+    const soapBody = wrapEventoSoap(signed);
+
+    const endpoints = getNFeEndpoints(
+      invoice.ufEmitter,
+      ambiente === 'PRODUCTION' ? 'producao' : 'homologacao',
+    );
+
+    const soapResponse = await this.soap.send(
+      endpoints.recepcaoEvento,
+      SOAP_ACTION_EVENTO,
+      soapBody,
+      decrypted,
+    );
+    const retorno = this.soap.parseEnvelopeBody(soapResponse);
+    const resultado = parseRetEvento(unwrapEventoMsg(retorno), invoice.accessKey);
+
+    if (resultado.success) {
+      const cancelKey = StorageService.keyFor({
+        tenantId: ctx.tenantId,
+        invoiceId: invoice.id,
+        kind: 'cancel-xml',
+      });
+      await this.storage.put(cancelKey, Buffer.from(signed, 'utf8'), 'application/xml');
+      await this.audit.record('INVOICE_CANCEL', {
+        tenantId: ctx.tenantId,
+        resourceId: invoice.id,
+        metadata: { protocolo: resultado.protocolo },
+      });
+      const updated = await this.prisma.asPrivileged().invoice.update({
+        where: { id: invoice.id },
+        data: {
+          status: InvoiceStatus.CANCELLED,
+          statusMessage: `${resultado.codigoStatus}: ${resultado.motivoStatus}`,
+          cancelledAt: new Date(),
+          cancelReason: reason,
+          cancelXmlPath: cancelKey,
+        },
+      });
+      await this.webhooks.dispatch(ctx.tenantId, 'INVOICE_CANCELLED', {
+        invoiceId: invoice.id,
+        accessKey: invoice.accessKey,
+        protocol: resultado.protocolo,
+      } as Prisma.InputJsonValue);
+      return updated;
+    }
+
+    throw new SefazError(`Cancelamento rejeitado: ${resultado.motivoStatus}`, {
+      cStat: resultado.codigoStatus,
     });
   }
 
-  async cancel(_ctx: { tenantId: string }, _invoice: Invoice, _reason: string): Promise<Invoice> {
-    throw new NotImplementedException(
-      'NFe cancellation orchestration not yet ported from legacy. Tracking in roadmap §Fase 2.',
+  async cartaCorrecao(
+    ctx: { tenantId: string },
+    invoice: Invoice,
+    correcao: string,
+    sequencia = 1,
+  ): Promise<SefazResponse> {
+    if (!invoice.accessKey) throw new BadRequestException('Invoice sem accessKey');
+    if (correcao.length < 15 || correcao.length > 1000) {
+      throw new BadRequestException('Correção deve ter entre 15 e 1000 caracteres');
+    }
+    const tpAmb = invoice.environment === 'PRODUCTION' ? '1' : '2';
+    const cert = await this.certs.resolveForEmitter(
+      ctx.tenantId,
+      (invoice.issuer as { cnpj?: string } | null)?.cnpj ?? '',
     );
+    const decrypted = await this.certs.decrypt(ctx.tenantId, cert.id, {
+      metadata: { chaveAcesso: invoice.accessKey, kind: 'NFE_CCE' },
+    });
+
+    const eventoXml = buildEventoCCeXml({
+      chaveAcesso: invoice.accessKey,
+      correcao,
+      sequencia,
+      ufEmitente: invoice.ufEmitter,
+      tpAmb,
+      loteId: gerarIdLote(),
+    });
+    const signed = this.signer.signEvent(eventoXml, decrypted);
+    const soapBody = wrapEventoSoap(signed);
+    const endpoints = getNFeEndpoints(
+      invoice.ufEmitter,
+      invoice.environment === 'PRODUCTION' ? 'producao' : 'homologacao',
+    );
+    const soapResponse = await this.soap.send(
+      endpoints.recepcaoEvento,
+      SOAP_ACTION_EVENTO,
+      soapBody,
+      decrypted,
+    );
+    const retorno = this.soap.parseEnvelopeBody(soapResponse);
+    return parseRetEvento(unwrapEventoMsg(retorno), invoice.accessKey);
+  }
+
+  private async parseAndMaybePoll(
+    soapResponse: string,
+    ufEmitente: string,
+    ambiente: Environment,
+    cert: { pfxBase64: string; password: string },
+  ): Promise<SefazResponse> {
+    const retorno = unwrapEventoMsg(this.soap.parseEnvelopeBody(soapResponse));
+    let resultado = parseRetAutorizacao(retorno);
+    if (resultado.status !== 'processando' || !resultado.nRec) return resultado;
+
+    const tpAmb = ambiente === 'PRODUCTION' ? '1' : '2';
+    const endpoints = getNFeEndpoints(ufEmitente, ambiente === 'PRODUCTION' ? 'producao' : 'homologacao');
+    const nRec = resultado.nRec;
+    for (let i = 0; i < POLLING_MAX_ATTEMPTS; i++) {
+      await sleep(POLLING_INTERVAL_MS);
+      try {
+        const body = wrapConsReciNFe(nRec, tpAmb);
+        const res = await this.soap.send(
+          endpoints.retAutorizacao,
+          SOAP_ACTION_RET_AUTORIZACAO,
+          body,
+          cert,
+        );
+        const r = parseRetAutorizacao(unwrapEventoMsg(this.soap.parseEnvelopeBody(res)));
+        if (r.status !== 'processando') return r;
+        resultado = r;
+      } catch (err) {
+        if (i === POLLING_MAX_ATTEMPTS - 1) {
+          this.logger.warn(`retAutorizacao polling failed after ${i + 1} attempts: ${(err as Error).message}`);
+          return resultado;
+        }
+      }
+    }
+    return resultado;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * SOAP Body comes back wrapped in an outer message element (e.g. nfeResultMsg).
+ * Walk one level deep to surface the actual ret* envelope. Idempotent on
+ * envelopes that don't have a wrapper.
+ */
+function unwrapEventoMsg(body: unknown): unknown {
+  if (!body || typeof body !== 'object') return body;
+  const obj = body as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    const inner = obj[key];
+    if (
+      inner &&
+      typeof inner === 'object' &&
+      ('cStat' in (inner as object) ||
+        'protNFe' in (inner as object) ||
+        'retEvento' in (inner as object) ||
+        'infRec' in (inner as object))
+    ) {
+      return inner;
+    }
+  }
+  return body;
+}
+
+function mapSefazStatus(s: SefazResponse['status']): InvoiceStatus {
+  switch (s) {
+    case 'autorizado':
+      return InvoiceStatus.AUTHORIZED;
+    case 'rejeitado':
+      return InvoiceStatus.REJECTED;
+    case 'denegado':
+      return InvoiceStatus.DENIED;
+    case 'cancelado':
+      return InvoiceStatus.CANCELLED;
+    case 'processando':
+      return InvoiceStatus.PROCESSING;
+    default:
+      return InvoiceStatus.REJECTED;
   }
 }

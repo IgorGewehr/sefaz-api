@@ -104,4 +104,21 @@ export class InvoiceService {
         throw new BadRequestException(`Cancel not supported for type ${invoice.type}`);
     }
   }
+
+  async correction(
+    tenantId: string,
+    id: string,
+    dto: { correction: string; sequence?: number },
+  ): Promise<unknown> {
+    const invoice = await this.getById(tenantId, id);
+    if (invoice.type !== InvoiceType.NFE) {
+      throw new BadRequestException(`Carta de Correção only applies to NF-e (got ${invoice.type})`);
+    }
+    return this.nfe.cartaCorrecao(
+      { tenantId },
+      invoice,
+      dto.correction,
+      dto.sequence ?? 1,
+    );
+  }
 }

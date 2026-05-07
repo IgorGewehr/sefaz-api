@@ -1,7 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import tsconfigPaths from 'tsconfig-paths/register';
-
-void tsconfigPaths;
+import { resolve } from 'node:path';
 
 export default defineConfig({
   test: {
@@ -12,13 +10,13 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@app/common': new URL('./libs/common/src', import.meta.url).pathname,
-      '@app/database': new URL('./libs/database/src', import.meta.url).pathname,
-      '@app/fiscal-core': new URL('./libs/fiscal-core/src', import.meta.url).pathname,
-      '@app/sefaz': new URL('./libs/sefaz/src', import.meta.url).pathname,
-      '@app/kms': new URL('./libs/kms/src', import.meta.url).pathname,
-      '@app/crypto': new URL('./libs/crypto/src', import.meta.url).pathname,
-      '@app/storage': new URL('./libs/storage/src', import.meta.url).pathname,
+      '@app/common': resolve(__dirname, 'libs/common/src'),
+      '@app/database': resolve(__dirname, 'libs/database/src'),
+      '@app/fiscal-core': resolve(__dirname, 'libs/fiscal-core/src'),
+      '@app/sefaz': resolve(__dirname, 'libs/sefaz/src'),
+      '@app/kms': resolve(__dirname, 'libs/kms/src'),
+      '@app/crypto': resolve(__dirname, 'libs/crypto/src'),
+      '@app/storage': resolve(__dirname, 'libs/storage/src'),
     },
   },
 });

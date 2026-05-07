@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsPositive, IsString, MaxLength, MinLength } from 'class-validator';
 import { Invoice, InvoiceType } from '@prisma/client';
 import { CurrentTenant, IdempotencyKey } from '@app/common';
 import { ApiKeyGuard } from '../../app/guards/api-key.guard';
@@ -22,6 +22,18 @@ class CancelInvoiceDto {
   @MinLength(15)
   @MaxLength(255)
   reason!: string;
+}
+
+class CorrectionDto {
+  @IsString()
+  @MinLength(15)
+  @MaxLength(1000)
+  correction!: string;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  sequence?: number;
 }
 
 class ListInvoicesQuery {
@@ -98,6 +110,17 @@ export class InvoiceController {
     @Body() dto: CancelInvoiceDto,
   ): Promise<InvoiceResponseDto> {
     return toResponse(await this.service.cancel(tenantId, id, dto));
+  }
+
+  @Post(':id/correction')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Carta de Correção (CC-e) — apenas NF-e' })
+  async correction(
+    @CurrentTenant('tenantId') tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: CorrectionDto,
+  ) {
+    return this.service.correction(tenantId, id, dto);
   }
 }
 
