@@ -121,4 +121,16 @@ export class InvoiceService {
       dto.sequence ?? 1,
     );
   }
+
+  async close(
+    tenantId: string,
+    id: string,
+    dto: { codigoMunicipio: string; uf: string; dataEncerramento?: string },
+  ): Promise<Invoice> {
+    const invoice = await this.getById(tenantId, id);
+    if (invoice.type !== InvoiceType.MDFE) {
+      throw new BadRequestException(`Encerramento only applies to MDF-e (got ${invoice.type})`);
+    }
+    return this.mdfe.encerrar({ tenantId }, invoice, dto);
+  }
 }

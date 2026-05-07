@@ -36,6 +36,22 @@ class CorrectionDto {
   sequence?: number;
 }
 
+class CloseMdfeDto {
+  @IsString()
+  @MinLength(7)
+  @MaxLength(7)
+  codigoMunicipio!: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(2)
+  uf!: string;
+
+  @IsOptional()
+  @IsString()
+  dataEncerramento?: string;
+}
+
 class ListInvoicesQuery {
   @IsOptional()
   @IsEnum(InvoiceType)
@@ -121,6 +137,20 @@ export class InvoiceController {
     @Body() dto: CorrectionDto,
   ) {
     return this.service.correction(tenantId, id, dto);
+  }
+
+  @Post(':id/close')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Encerramento — apenas MDF-e (evento 110112)',
+    description: 'Encerra um MDF-e autorizado quando a carga chega ao destino.',
+  })
+  async close(
+    @CurrentTenant('tenantId') tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: CloseMdfeDto,
+  ): Promise<InvoiceResponseDto> {
+    return toResponse(await this.service.close(tenantId, id, dto));
   }
 }
 
