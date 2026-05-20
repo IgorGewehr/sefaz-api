@@ -162,6 +162,9 @@ router.post('/emitir', async (req: Request, res: Response) => {
     const normalized = normalizeEmitirRequest(body);
     const result = await nfseService.emitirNfse(normalized);
     const statusCode = result.success ? 200 : 422;
+    if (!result.success) {
+      console.error('[NFS-e] Emissão rejeitada:', JSON.stringify({ status: result.status, mensagens: result.mensagens }, null, 2));
+    }
     res.status(statusCode).json(result);
   } catch (err: any) {
     console.error('[NFS-e] Erro ao emitir:', err.message);

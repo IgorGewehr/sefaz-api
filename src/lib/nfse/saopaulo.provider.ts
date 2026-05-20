@@ -583,6 +583,7 @@ export class SaoPauloProvider implements INfseProvider {
 
       // 4. Parsear resposta
       const result = parseRetornoEnvioRPS(soapResp);
+      console.log(`[SP] Resultado emissão: success=${result.success} status=${result.status}${result.numeroNfse ? ` nfse=${result.numeroNfse}` : ''}${result.mensagens?.length ? ` mensagens=${JSON.stringify(result.mensagens)}` : ''}`);
       if (result.success && result.numeroNfse && result.codigoVerificacao) {
         const im = apenasNumeros(request.prestador.inscricaoMunicipal);
         result.linkVisualizacao = `https://nfe.prefeitura.sp.gov.br/contribuinte/notaprint.aspx?inscricao=${im}&nf=${result.numeroNfse}&verificacao=${result.codigoVerificacao}`;

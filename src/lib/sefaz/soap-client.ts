@@ -161,8 +161,9 @@ export async function enviarSoap(
           resolve(data);
         } else {
           logSoapResponse(url, soapAction, res.statusCode || 500, data, duration);
-          // 4xx normalmente é erro de payload nosso; só conta como falha de infra se for 5xx
-          if (res.statusCode && res.statusCode >= 500) {
+          // 3xx = redirect (manutenção/indisponível); 5xx = erro servidor → falha de infra
+          // 4xx = erro de payload nosso → não conta como falha de infra
+          if (res.statusCode && (res.statusCode >= 500 || (res.statusCode >= 300 && res.statusCode < 400))) {
             recordFailure(url);
           } else {
             recordSuccess(url);
