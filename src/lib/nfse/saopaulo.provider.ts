@@ -429,7 +429,12 @@ async function enviarParaSP(
 
   const actionName = operacao.charAt(0).toLowerCase() + operacao.slice(1);
   const soapAction = `${SP_SOAP_ACTION_BASE}/${actionName}`;
-  return enviarSoap(url, soapAction, soapBody, certificado, '1.2');
+  // SOAP 1.1 obrigatório: o lotenfe.asmx síncrono devolve HTTP 302 redirect
+  // pra página institucional quando recebe Content-Type application/soap+xml
+  // (SOAP 1.2). Apenas o endpoint async (lotenfeAsync.asmx) aceita 1.2.
+  // Histórico: commit 1af6592 mudou pra 1.2 por simetria com NFCe/NFe 4.0,
+  // quebrando emissão real. Confirmado pela comunidade ACBr/NFePHP.
+  return enviarSoap(url, soapAction, soapBody, certificado, '1.1');
 }
 
 // ============================================================
