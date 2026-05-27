@@ -15,6 +15,7 @@ import type {
   NFeTransporte,
   NFePagamento,
   NFeCobranca,
+  NFeReference,
   Endereco,
 } from '../../types';
 import {
@@ -521,6 +522,11 @@ function buildIdeGroup(params: {
   procEmi: string;
   verProc: string;
   dhSaiEnt?: string;
+  /** NFref — referências a NF-e anteriores (devolução, complemento, ajuste). */
+  referencias?: NFeReference[];
+  /** Contingência off-line (tpEmis=9): obriga dhCont + xJust no <ide>. */
+  dhCont?: string;
+  xJust?: string;
 }): Record<string, any> {
   const ide: Record<string, any> = {
     cUF: params.cUF,
@@ -553,6 +559,21 @@ function buildIdeGroup(params: {
 
   ide['procEmi'] = params.procEmi;
   ide['verProc'] = params.verProc;
+
+  // dhCont + xJust: obrigatórios quando tpEmis indica contingência (4, 5, 6, 7, 9).
+  // Posição no schema NF-e 4.00: entre verProc e NFref.
+  if (params.dhCont) ide['dhCont'] = params.dhCont;
+  if (params.xJust) ide['xJust'] = params.xJust;
+
+  // NFref: posicionado por último em <ide> (após verProc) conforme schema
+  // NF-e 4.00 (TIde). Pode haver 0..500 ocorrências; cada uma vira um
+  // <NFref><refNFe>...</refNFe></NFref> separado. xmlbuilder2 serializa
+  // arrays como tags repetidas — perfeito pro caso.
+  if (params.referencias && params.referencias.length > 0) {
+    ide['NFref'] = params.referencias.map((ref) => ({
+      refNFe: apenasNumeros(ref.refNFe),
+    }));
+  }
 
   return ide;
 }
@@ -886,6 +907,7 @@ export function buildNFeXml(
     indIntermed: (request.presencaComprador === '2' || request.presencaComprador === '9') ? '0' : undefined,
     procEmi: '0', // 0=Emissão com aplicação do contribuinte
     verProc: 'SefazAPI-1.0',
+    referencias: request.referencias,
   });
 
   const emit = buildEmitenteGroup(request.emitente);
@@ -984,6 +1006,9 @@ export function buildNFCeXml(
   const dhEmi = formatarDataSefaz(undefined, request.ufEmitente);
   const serie = request.serie || '1';
 
+  // Contingência off-line: tpEmis=9 + dhCont + xJust. SEFAZ aceita transmissão
+  // até 24h após dhCont — o XML é assinado agora, transmitido depois.
+  const isContingencia = !!request.contingencia;
   const ide = buildIdeGroup({
     cUF,
     cNF,
@@ -996,7 +1021,7 @@ export function buildNFCeXml(
     idDest: '1', // 1=Operação interna (NFCe é sempre interna)
     cMunFG: request.emitente.endereco.codigoMunicipio,
     tpImp: '4', // 4=DANFE NFCe
-    tpEmis: '1', // 1=Emissão normal
+    tpEmis: isContingencia ? '9' : '1', // 9=Contingência off-line NFCe
     cDV,
     tpAmb,
     finNFe: '1', // 1=Normal
@@ -1004,6 +1029,8 @@ export function buildNFCeXml(
     indPres: '1', // 1=Presencial
     procEmi: '0',
     verProc: 'SefazAPI-1.0',
+    dhCont: request.contingencia?.dhCont,
+    xJust: request.contingencia?.xJust,
   });
 
   const emit = buildEmitenteGroup(request.emitente);

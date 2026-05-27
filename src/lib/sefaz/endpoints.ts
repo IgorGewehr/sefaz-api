@@ -338,6 +338,72 @@ const NFCE_ENDPOINTS: Record<string, Record<Ambiente, WebServices>> = {
   ),
 };
 
+// ============================================================
+// SVC — Sefaz Virtual de Contingência
+// ============================================================
+// Acionado quando a SEFAZ autorizadora original (estadual ou SVAN/SVRS)
+// está fora do ar. O emitente troca `tpEmis` no XML para '6' (SVC-AN) ou
+// '7' (SVC-RS), recalcula a chave de acesso com o novo tpEmis e
+// transmite para o endpoint SVC correspondente.
+//
+// Distribuição por UF (definida pela Receita Federal — NT 2014.002 e
+// atualizações). A escolha SVC-AN vs SVC-RS é fixa por UF.
+//
+// IMPORTANTE: SVC NÃO oferece serviço de inutilização nem MDF-e — só
+// autorização/consulta/status/eventos básicos. O campo `inutilizacao`
+// abaixo aponta para o endpoint normal da UF (não disponível em SVC).
+
+const NFE_SVC_AN_PRODUCAO: WebServices = {
+  autorizacao: 'https://www.svc.fazenda.gov.br/NFeAutorizacao4/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://www.svc.fazenda.gov.br/NFeRetAutorizacao4/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://www.svc.fazenda.gov.br/NFeConsultaProtocolo4/NFeConsultaProtocolo4.asmx',
+  statusServico: 'https://www.svc.fazenda.gov.br/NFeStatusServico4/NFeStatusServico4.asmx',
+  // SVC não tem inutilização — campo presente para satisfazer o type, mas
+  // uma chamada a esse endpoint vai falhar.
+  inutilizacao: 'https://www.svc.fazenda.gov.br/NFeInutilizacao4/NFeInutilizacao4.asmx',
+  recepcaoEvento: 'https://www.svc.fazenda.gov.br/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx',
+};
+
+const NFE_SVC_AN_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://hom.svc.fazenda.gov.br/NFeAutorizacao4/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://hom.svc.fazenda.gov.br/NFeRetAutorizacao4/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://hom.svc.fazenda.gov.br/NFeConsultaProtocolo4/NFeConsultaProtocolo4.asmx',
+  statusServico: 'https://hom.svc.fazenda.gov.br/NFeStatusServico4/NFeStatusServico4.asmx',
+  inutilizacao: 'https://hom.svc.fazenda.gov.br/NFeInutilizacao4/NFeInutilizacao4.asmx',
+  recepcaoEvento: 'https://hom.svc.fazenda.gov.br/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx',
+};
+
+const NFE_SVC_RS_PRODUCAO: WebServices = {
+  autorizacao: 'https://nfe.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://nfe.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://nfe.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx',
+  statusServico: 'https://nfe.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx',
+  inutilizacao: 'https://nfe.svrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx',
+  recepcaoEvento: 'https://nfe.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx',
+};
+
+const NFE_SVC_RS_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx',
+  retAutorizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx',
+  consultaProtocolo: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx',
+  statusServico: 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx',
+  inutilizacao: 'https://nfe-homologacao.svrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx',
+  recepcaoEvento: 'https://nfe-homologacao.svrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx',
+};
+
+// Mapa UF → tipo de SVC (referência: documentação oficial NFe / NT 2014.002).
+// SVC-AN atende a maioria; SVC-RS atende UFs cuja SEFAZ normal usa SVAN.
+type SVCType = 'AN' | 'RS';
+const SVC_BY_UF: Record<string, SVCType> = {
+  // SVC-AN (Ambiente Nacional)
+  AC: 'AN', AL: 'AN', AP: 'AN', CE: 'AN', DF: 'AN', ES: 'AN',
+  MG: 'AN', PA: 'AN', PB: 'AN', PI: 'AN', RJ: 'AN', RN: 'AN',
+  RO: 'AN', RR: 'AN', RS: 'AN', SC: 'AN', SE: 'AN', SP: 'AN', TO: 'AN',
+  // SVC-RS (Rio Grande do Sul)
+  AM: 'RS', BA: 'RS', GO: 'RS', MA: 'RS', MS: 'RS', MT: 'RS',
+  PE: 'RS', PR: 'RS',
+};
+
 // --- MDF-e (Modelo 58) - Usa SVRS para todos ---
 
 interface MdfeWebServices {
@@ -386,4 +452,45 @@ export function getMDFeEndpoints(ambiente: Ambiente): MdfeWebServices {
   return ambiente === 'producao' ? MDFE_SVRS_PRODUCAO : MDFE_SVRS_HOMOLOGACAO;
 }
 
-export type { WebServices, MdfeWebServices, Ambiente };
+/**
+ * Retorna os endpoints SVC (Sefaz Virtual de Contingência) adequados para
+ * a UF. Use APENAS quando a SEFAZ normal está fora do ar e o emitente
+ * escolheu emitir em contingência (tpEmis='6' para SVC-AN ou '7' para SVC-RS).
+ *
+ * IMPORTANTE: ao usar SVC, o XML deve ser gerado com:
+ *   - `tpEmis` correto ('6' = SVC-AN, '7' = SVC-RS)
+ *   - Chave de acesso RECALCULADA com o novo tpEmis (o DV módulo 11 muda)
+ *   - `dhCont` (data/hora entrada em contingência) e `xJust` (justificativa)
+ *     em <ide>
+ *
+ * Limitações:
+ *   - SVC NÃO oferece inutilização (sempre via SEFAZ normal quando voltar)
+ *   - Após a SEFAZ normal voltar, emitir em SVC NÃO é mais permitido
+ *
+ * @returns objeto WebServices com URLs SVC-AN ou SVC-RS conforme a UF
+ * @throws  Error se a UF não estiver mapeada
+ */
+export function getSVCEndpoints(uf: string, ambiente: Ambiente): WebServices {
+  const svcType = SVC_BY_UF[uf.toUpperCase()];
+  if (!svcType) {
+    throw new Error(`UF não suportada para SVC: ${uf}`);
+  }
+  if (svcType === 'AN') {
+    return ambiente === 'producao' ? NFE_SVC_AN_PRODUCAO : NFE_SVC_AN_HOMOLOGACAO;
+  }
+  return ambiente === 'producao' ? NFE_SVC_RS_PRODUCAO : NFE_SVC_RS_HOMOLOGACAO;
+}
+
+/**
+ * Retorna qual SVC ('AN' ou 'RS') é o adequado para a UF. Útil para
+ * decidir qual valor de `tpEmis` colocar no XML antes de assinar.
+ */
+export function getSVCType(uf: string): SVCType {
+  const svcType = SVC_BY_UF[uf.toUpperCase()];
+  if (!svcType) {
+    throw new Error(`UF não suportada para SVC: ${uf}`);
+  }
+  return svcType;
+}
+
+export type { WebServices, MdfeWebServices, Ambiente, SVCType };

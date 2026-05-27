@@ -172,6 +172,20 @@ export interface NFeCobranca {
   }>;
 }
 
+/**
+ * Referência a uma NF-e anterior (tag <NFref> dentro de <ide>).
+ * Obrigatório quando finalidade=4 (devolução) — sem isso a SEFAZ rejeita
+ * com erro "nota nova inválida".
+ *
+ * MVP: apenas refNFe (chave de acesso da nota original, 44 dígitos).
+ * Não cobre <refNF> manual (NF-e legada não cadastrada na SEFAZ) — caso
+ * raro; adicionar depois se aparecer demanda.
+ */
+export interface NFeReference {
+  /** Chave de acesso da NF-e original (44 dígitos numéricos). */
+  refNFe: string;
+}
+
 export interface NFeRequest {
   emitente: NFeEmitente;
   destinatario: NFeDestinatario;
@@ -179,6 +193,11 @@ export interface NFeRequest {
   naturezaOperacao: string;
   tipoOperacao: '0' | '1'; // 0=Entrada, 1=Saída
   finalidade: '1' | '2' | '3' | '4'; // 1=Normal, 2=Complementar, 3=Ajuste, 4=Devolução
+  /**
+   * Referências a NF-e anteriores. Obrigatório (1..n) quando
+   * finalidade='4'. SEFAZ aceita até 500 refs por nota.
+   */
+  referencias?: NFeReference[];
   consumidorFinal: '0' | '1';
   presencaComprador: '0' | '1' | '2' | '3' | '4' | '5' | '9';
   transporte: NFeTransporte;
@@ -201,6 +220,21 @@ export interface NFeRequest {
 }
 
 // --- NFCe ---
+
+/**
+ * Contingência off-line da NFC-e (tpEmis=9).
+ * Quando SEFAZ está indisponível, o emissor gera o XML com chave própria,
+ * assina, imprime DANFCE com aviso "EM CONTINGÊNCIA" e dá ao consumidor.
+ * O XML pré-assinado fica salvo até a SEFAZ voltar, quando é transmitido
+ * via /nfce/contingencia/transmit. SEFAZ aceita até 24h após dhCont.
+ */
+export interface NFCeContingencia {
+  /** Data/hora de entrada em contingência (ISO 8601). */
+  dhCont: string;
+  /** Justificativa (mín. 15, máx. 256 caracteres). */
+  xJust: string;
+}
+
 export interface NFCeRequest {
   emitente: NFeEmitente;
   consumidor?: {
@@ -223,6 +257,12 @@ export interface NFCeRequest {
   informacoesAdicionais?: {
     contribuinte?: string;
   };
+  /**
+   * Quando presente, o XML é gerado com tpEmis=9 (contingência off-line)
+   * + dhCont + xJust. Usado pelo endpoint /nfce/contingencia/prepare —
+   * o XML é assinado mas NÃO enviado pra SEFAZ no mesmo request.
+   */
+  contingencia?: NFCeContingencia;
 }
 
 // --- MDF-e ---
