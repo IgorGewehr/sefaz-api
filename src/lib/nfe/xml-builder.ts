@@ -15,6 +15,7 @@ import type {
   NFeTransporte,
   NFePagamento,
   NFeCobranca,
+  NFeReference,
   Endereco,
 } from '../../types';
 import {
@@ -521,6 +522,8 @@ function buildIdeGroup(params: {
   procEmi: string;
   verProc: string;
   dhSaiEnt?: string;
+  /** NFref — referências a NF-e anteriores (devolução, complemento, ajuste). */
+  referencias?: NFeReference[];
 }): Record<string, any> {
   const ide: Record<string, any> = {
     cUF: params.cUF,
@@ -553,6 +556,16 @@ function buildIdeGroup(params: {
 
   ide['procEmi'] = params.procEmi;
   ide['verProc'] = params.verProc;
+
+  // NFref: posicionado por último em <ide> (após verProc) conforme schema
+  // NF-e 4.00 (TIde). Pode haver 0..500 ocorrências; cada uma vira um
+  // <NFref><refNFe>...</refNFe></NFref> separado. xmlbuilder2 serializa
+  // arrays como tags repetidas — perfeito pro caso.
+  if (params.referencias && params.referencias.length > 0) {
+    ide['NFref'] = params.referencias.map((ref) => ({
+      refNFe: apenasNumeros(ref.refNFe),
+    }));
+  }
 
   return ide;
 }
@@ -883,6 +896,7 @@ export function buildNFeXml(
     indIntermed: (request.presencaComprador === '2' || request.presencaComprador === '9') ? '0' : undefined,
     procEmi: '0', // 0=Emissão com aplicação do contribuinte
     verProc: 'SefazAPI-1.0',
+    referencias: request.referencias,
   });
 
   const emit = buildEmitenteGroup(request.emitente);

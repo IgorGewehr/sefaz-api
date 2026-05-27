@@ -172,6 +172,20 @@ export interface NFeCobranca {
   }>;
 }
 
+/**
+ * Referência a uma NF-e anterior (tag <NFref> dentro de <ide>).
+ * Obrigatório quando finalidade=4 (devolução) — sem isso a SEFAZ rejeita
+ * com erro "nota nova inválida".
+ *
+ * MVP: apenas refNFe (chave de acesso da nota original, 44 dígitos).
+ * Não cobre <refNF> manual (NF-e legada não cadastrada na SEFAZ) — caso
+ * raro; adicionar depois se aparecer demanda.
+ */
+export interface NFeReference {
+  /** Chave de acesso da NF-e original (44 dígitos numéricos). */
+  refNFe: string;
+}
+
 export interface NFeRequest {
   emitente: NFeEmitente;
   destinatario: NFeDestinatario;
@@ -179,6 +193,11 @@ export interface NFeRequest {
   naturezaOperacao: string;
   tipoOperacao: '0' | '1'; // 0=Entrada, 1=Saída
   finalidade: '1' | '2' | '3' | '4'; // 1=Normal, 2=Complementar, 3=Ajuste, 4=Devolução
+  /**
+   * Referências a NF-e anteriores. Obrigatório (1..n) quando
+   * finalidade='4'. SEFAZ aceita até 500 refs por nota.
+   */
+  referencias?: NFeReference[];
   consumidorFinal: '0' | '1';
   presencaComprador: '0' | '1' | '2' | '3' | '4' | '5' | '9';
   transporte: NFeTransporte;
