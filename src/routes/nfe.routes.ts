@@ -133,6 +133,90 @@ router.post('/nfce/emitir', async (req: Request, res: Response) => {
   }
 });
 
+// POST /nfce/contingencia/prepare - Gera XML assinado em contingência off-line
+//   sem transmitir pra SEFAZ. Operador imprime DANFCE e armazena XML pra
+//   transmissão posterior via /nfce/contingencia/transmit.
+router.post('/nfce/contingencia/prepare', async (req: Request, res: Response) => {
+  try {
+    const data: NFCeRequest = req.body;
+
+    if (!data.contingencia?.xJust) {
+      res.status(400).json({ error: 'contingencia.xJust (justificativa, 15-256 caracteres) é obrigatório' });
+      return;
+    }
+    if (!data.contingencia.dhCont) {
+      res.status(400).json({ error: 'contingencia.dhCont (data/hora ISO de entrada em contingência) é obrigatório' });
+      return;
+    }
+    if (!data.emitente?.cnpj || !data.itens?.length) {
+      res.status(400).json({ error: 'Campos obrigatórios: emitente, itens' });
+      return;
+    }
+    if (!validarCNPJ(data.emitente.cnpj)) {
+      res.status(400).json({ error: 'CNPJ do emitente inválido (DV incorreto)' });
+      return;
+    }
+    if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
+      res.status(400).json({ error: 'Certificado digital (pfxBase64 + password) é obrigatório' });
+      return;
+    }
+    if (!data.csc?.id || !data.csc?.token) {
+      res.status(400).json({ error: 'CSC (id + token) é obrigatório para NFCe' });
+      return;
+    }
+    if (!data.ufEmitente) {
+      res.status(400).json({ error: 'ufEmitente é obrigatório' });
+      return;
+    }
+    if (!data.numero || data.numero < 1) {
+      res.status(400).json({ error: 'numero da nota é obrigatório' });
+      return;
+    }
+    if (certMismatch(res, data.certificado, data.emitente.cnpj)) return;
+
+    const result = await nfeService.prepararNFCeContingencia(data);
+    const statusCode = result.success ? 200 : 422;
+    res.status(statusCode).json(result);
+  } catch (err: any) {
+    console.error('[NFCe Contingencia] Erro ao preparar:', err.message);
+    res.status(500).json({ error: 'Erro interno ao preparar contingência' });
+  }
+});
+
+// POST /nfce/contingencia/transmit - Envia XML já assinado (gerado por
+//   /nfce/contingencia/prepare) pra SEFAZ. Use quando a SEFAZ voltar — em
+//   até 24h após dhCont pra evitar rejeição por extemporaneidade.
+router.post('/nfce/contingencia/transmit', async (req: Request, res: Response) => {
+  try {
+    const { signedXml, ufEmitente, certificado, ambiente } = req.body as {
+      signedXml?: string;
+      ufEmitente?: string;
+      certificado?: CertificateData;
+      ambiente?: 'producao' | 'homologacao';
+    };
+
+    if (!signedXml || typeof signedXml !== 'string') {
+      res.status(400).json({ error: 'signedXml é obrigatório (XML assinado pelo prepare)' });
+      return;
+    }
+    if (!ufEmitente) {
+      res.status(400).json({ error: 'ufEmitente é obrigatório' });
+      return;
+    }
+    if (!certificado?.pfxBase64 || !certificado?.password) {
+      res.status(400).json({ error: 'Certificado digital (pfxBase64 + password) é obrigatório' });
+      return;
+    }
+
+    const result = await nfeService.transmitirNFCeContingencia(signedXml, ufEmitente, certificado, ambiente);
+    const statusCode = result.success ? 200 : 422;
+    res.status(statusCode).json(result);
+  } catch (err: any) {
+    console.error('[NFCe Contingencia] Erro ao transmitir:', err.message);
+    res.status(500).json({ error: 'Erro interno ao transmitir contingência' });
+  }
+});
+
 // POST /nfe/consultar - Consultar protocolo NFe/NFCe
 router.post('/consultar', async (req: Request, res: Response) => {
   try {

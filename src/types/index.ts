@@ -220,6 +220,21 @@ export interface NFeRequest {
 }
 
 // --- NFCe ---
+
+/**
+ * Contingência off-line da NFC-e (tpEmis=9).
+ * Quando SEFAZ está indisponível, o emissor gera o XML com chave própria,
+ * assina, imprime DANFCE com aviso "EM CONTINGÊNCIA" e dá ao consumidor.
+ * O XML pré-assinado fica salvo até a SEFAZ voltar, quando é transmitido
+ * via /nfce/contingencia/transmit. SEFAZ aceita até 24h após dhCont.
+ */
+export interface NFCeContingencia {
+  /** Data/hora de entrada em contingência (ISO 8601). */
+  dhCont: string;
+  /** Justificativa (mín. 15, máx. 256 caracteres). */
+  xJust: string;
+}
+
 export interface NFCeRequest {
   emitente: NFeEmitente;
   consumidor?: {
@@ -242,6 +257,12 @@ export interface NFCeRequest {
   informacoesAdicionais?: {
     contribuinte?: string;
   };
+  /**
+   * Quando presente, o XML é gerado com tpEmis=9 (contingência off-line)
+   * + dhCont + xJust. Usado pelo endpoint /nfce/contingencia/prepare —
+   * o XML é assinado mas NÃO enviado pra SEFAZ no mesmo request.
+   */
+  contingencia?: NFCeContingencia;
 }
 
 // --- MDF-e ---

@@ -445,6 +445,8 @@ function gerarChaveENumero(params: {
   modelo: '55' | '65';
   serie: string;
   numero?: number;
+  /** Tipo de emissão SEFAZ: '1'=Normal, '6'=SVC-AN, '7'=SVC-RS, '9'=Contingência NFC-e off-line. Default '1'. */
+  tipoEmissao?: string;
 }): { chaveAcesso: string; numero: number; codigoNumerico: string } {
   const { ufEmitente, cnpj, modelo, serie } = params;
 
@@ -466,7 +468,7 @@ function gerarChaveENumero(params: {
     modelo,
     serie,
     numero,
-    tipoEmissao: '1',
+    tipoEmissao: params.tipoEmissao || '1',
     codigoNumerico,
     uf: ufEmitente,
   });
@@ -884,6 +886,122 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
       status: 'erro',
       codigoStatus: 'ERR',
       motivoStatus: error.message || 'Erro desconhecido ao emitir NFCe',
+      erros: [error.message],
+    };
+  }
+}
+
+/**
+ * Prepara NFC-e em contingência off-line (tpEmis=9). Gera chave própria,
+ * monta XML com dhCont+xJust, assina — mas NÃO transmite pra SEFAZ. O
+ * emissor armazena o XML assinado + chave e imprime DANFCE com aviso "EM
+ * CONTINGÊNCIA". A transmissão acontece via transmitirNFCeContingencia
+ * quando a SEFAZ volta (até 24h após dhCont).
+ *
+ * Pré-condição: request.contingencia tem que estar preenchido com
+ * { dhCont, xJust }. xJust precisa ter 15-256 caracteres.
+ */
+export async function prepararNFCeContingencia(
+  request: NFCeRequest,
+): Promise<{ success: boolean; chaveAcesso?: string; xml?: string; numero?: number; status: string; motivoStatus?: string; erros?: string[] }> {
+  try {
+    if (!request.contingencia) {
+      return { success: false, status: 'erro', motivoStatus: 'contingencia obrigatória neste endpoint', erros: ['contingencia ausente'] };
+    }
+    const { xJust } = request.contingencia;
+    if (!xJust || xJust.length < 15 || xJust.length > 256) {
+      return { success: false, status: 'erro', motivoStatus: 'xJust deve ter 15-256 caracteres', erros: ['xJust inválido'] };
+    }
+
+    const validationErrors = validateNFCePayload(request);
+    if (validationErrors.length > 0) {
+      return {
+        success: false,
+        status: 'erro',
+        motivoStatus: 'Dados inválidos: ' + validationErrors.join('; '),
+        erros: validationErrors,
+      };
+    }
+
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
+    const serie = request.serie || '1';
+
+    // Chave de acesso com tpEmis='9' (contingência off-line).
+    const { chaveAcesso, numero } = gerarChaveENumero({
+      ufEmitente: request.ufEmitente,
+      cnpj: request.emitente.cnpj,
+      modelo: '65',
+      serie,
+      numero: request.numero,
+      tipoEmissao: '9',
+    });
+
+    // Monta XML com tpEmis=9 + dhCont + xJust (vem de request.contingencia).
+    const nfceXml = buildNFCeXml(request, chaveAcesso, numero, tpAmb);
+
+    // Assina. Em contingência off-line NÃO inserimos infNFeSupl (QR Code SEFAZ) —
+    // só seria inserido se quiséssemos QR de consulta, mas o DANFCE em contingência
+    // não exige (a SEFAZ ainda não autorizou). O QR padrão só é válido após autorização.
+    const signedXml = assinarXml(nfceXml, request.certificado, 'infNFe');
+
+    return {
+      success: true,
+      status: 'contingencia',
+      chaveAcesso,
+      numero,
+      xml: signedXml,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      status: 'erro',
+      motivoStatus: error.message || 'Erro desconhecido ao preparar NFC-e em contingência',
+      erros: [error.message],
+    };
+  }
+}
+
+/**
+ * Transmite NFC-e em contingência (XML já assinado pelo prepararNFCeContingencia)
+ * pra SEFAZ. Operador chama isso quando SEFAZ volta — preferencialmente em até
+ * 24h após dhCont, senão a SEFAZ pode rejeitar por extemporaneidade.
+ */
+export async function transmitirNFCeContingencia(
+  signedXml: string,
+  ufEmitente: string,
+  certificado: NFCeRequest['certificado'],
+  ambiente?: 'producao' | 'homologacao',
+): Promise<SefazResponse> {
+  try {
+    const resolvedAmbiente = ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = resolvedAmbiente === 'producao' ? '1' : '2';
+
+    const loteId = gerarIdLote();
+    const soapBody = wrapEnviNFe(signedXml, loteId, '1');
+
+    const endpoints = getNFCeEndpoints(ufEmitente, resolvedAmbiente);
+    const soapResponse = await enviarSoap(
+      endpoints.autorizacao,
+      'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote',
+      soapBody,
+      certificado,
+    );
+
+    const retorno = extrairRetorno(soapResponse);
+    const resultado = parseRetAutorizacao(retorno);
+
+    if (resultado.success) {
+      resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
+    }
+
+    return resultado;
+  } catch (error: any) {
+    return {
+      success: false,
+      status: 'erro',
+      codigoStatus: 'ERR',
+      motivoStatus: error.message || 'Erro desconhecido ao transmitir NFC-e em contingência',
       erros: [error.message],
     };
   }
