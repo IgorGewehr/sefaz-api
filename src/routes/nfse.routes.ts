@@ -85,7 +85,18 @@ function normalizeEmitirRequest(body: any): NfseEmitirRequest {
       issRetido,
       exigibilidadeIss: body.valores?.exigibilidadeIss || '1',
       valorDeducoes: body.valores?.valorDeducoes,
-      descontoIncondicionado: body.valores?.valorDescontoIncondicionado,
+      descontoIncondicionado: body.valores?.valorDescontoIncondicionado ?? body.valores?.descontoIncondicionado,
+      // Retenções federais e demais campos opcionais: propagar — descartá-los
+      // aqui fazia a nota sair com PIS/COFINS/INSS/IR/CSLL zerados mesmo
+      // quando o cliente os informava (nota ≠ payload do emissor).
+      valorPis: body.valores?.valorPis,
+      valorCofins: body.valores?.valorCofins,
+      valorInss: body.valores?.valorInss,
+      valorIr: body.valores?.valorIr,
+      valorCsll: body.valores?.valorCsll,
+      valorIssRetido: body.valores?.valorIssRetido ?? body.issqn?.valorISSRetido,
+      outrasRetencoes: body.valores?.outrasRetencoes,
+      descontoCondicionado: body.valores?.valorDescontoCondicionado ?? body.valores?.descontoCondicionado,
     },
     rps: {
       numero: body.numeroDPS ?? body.rps?.numero ?? 0,

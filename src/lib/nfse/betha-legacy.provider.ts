@@ -18,6 +18,7 @@ import type {
   NfseResponse,
   NfseMensagemRetorno,
 } from '../../types/nfse';
+import { config } from '../../config';
 import { assinarXml } from '../sefaz/xml-signer';
 import { extrairBodySoap } from '../sefaz/soap-client';
 import { apenasNumeros, formatarValor, escapeXml } from '../utils';
@@ -37,7 +38,10 @@ const BETHA_LEGACY_PATH_PROD = '/e-nota-contribuinte-ws/nfseWS';
 const BETHA_LEGACY_PATH_HOM  = '/e-nota-contribuinte-test-ws/nfseWS';
 
 function getLegacyPath(ambiente?: string): string {
-  return ambiente === 'homologacao' ? BETHA_LEGACY_PATH_HOM : BETHA_LEGACY_PATH_PROD;
+  // Request sem ambiente cai no ambiente DO SERVIDOR — nunca direto em
+  // produção (um servidor de homologação mandava lote pra prod por default).
+  const efetivo = ambiente || config.sefazAmbiente;
+  return efetivo === 'homologacao' ? BETHA_LEGACY_PATH_HOM : BETHA_LEGACY_PATH_PROD;
 }
 
 const CABECALHO = `<cabecalho xmlns="${BETHA_NS}" versao="2.02"><versaoDados>2.02</versaoDados></cabecalho>`;

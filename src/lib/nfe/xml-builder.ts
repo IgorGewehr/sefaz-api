@@ -545,6 +545,16 @@ function buildIdeGroup(params: {
   ide['tpNF'] = params.tpNF;
   ide['idDest'] = params.idDest;
   ide['cMunFG'] = params.cMunFG;
+
+  // NFref: no XSD 4.00 (TIde) o grupo fica entre cMunFG (B12) e tpImp (B21).
+  // 0..500 ocorrências; xmlbuilder2 serializa arrays como tags repetidas.
+  // (Posição errada aqui = rejeição 225 em toda devolução/complementar.)
+  if (params.referencias && params.referencias.length > 0) {
+    ide['NFref'] = params.referencias.map((ref) => ({
+      refNFe: apenasNumeros(ref.refNFe),
+    }));
+  }
+
   ide['tpImp'] = params.tpImp;
   ide['tpEmis'] = params.tpEmis;
   ide['cDV'] = params.cDV;
@@ -561,19 +571,9 @@ function buildIdeGroup(params: {
   ide['verProc'] = params.verProc;
 
   // dhCont + xJust: obrigatórios quando tpEmis indica contingência (4, 5, 6, 7, 9).
-  // Posição no schema NF-e 4.00: entre verProc e NFref.
+  // São os ÚLTIMOS elementos do <ide> no XSD 4.00.
   if (params.dhCont) ide['dhCont'] = params.dhCont;
   if (params.xJust) ide['xJust'] = params.xJust;
-
-  // NFref: posicionado por último em <ide> (após verProc) conforme schema
-  // NF-e 4.00 (TIde). Pode haver 0..500 ocorrências; cada uma vira um
-  // <NFref><refNFe>...</refNFe></NFref> separado. xmlbuilder2 serializa
-  // arrays como tags repetidas — perfeito pro caso.
-  if (params.referencias && params.referencias.length > 0) {
-    ide['NFref'] = params.referencias.map((ref) => ({
-      refNFe: apenasNumeros(ref.refNFe),
-    }));
-  }
 
   return ide;
 }

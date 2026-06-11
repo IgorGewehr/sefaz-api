@@ -356,6 +356,15 @@ describe('buildDpsXml — valores', () => {
     expect(xml).toContain('<tpRetISSQN>1</tpRetISSQN>');
   });
 
+  it('request.ambiente=producao sobrescreve config (tpAmb=1)', () => {
+    // Regressão: emitir() ignorava request.ambiente na escolha do endpoint;
+    // este teste pinna que o tpAmb do DPS segue o ambiente DO REQUEST.
+    const req = makeRequest();
+    req.ambiente = 'producao';
+    const xml = buildDpsXml(req);
+    expect(xml).toContain('<tpAmb>1</tpAmb>');
+  });
+
   it('tpRetISSQN=2 quando ISS retido', () => {
     const req = makeRequest();
     req.valores.issRetido = true;

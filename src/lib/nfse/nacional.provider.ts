@@ -155,7 +155,7 @@ async function httpRequest(
 export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): string {
   const cnpj = apenasNumeros(request.prestador.cnpj);
   const v = request.valores;
-  const ambienteEfetivo = (request as any).ambiente || config.sefazAmbiente;
+  const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
   const tpAmb = ambienteEfetivo === 'producao' ? '1' : '2';
   const isSimples = request.prestador.optanteSimplesNacional;
 
@@ -480,7 +480,10 @@ export class NacionalProvider implements INfseProvider {
       const xmlDps = buildDpsXml(request);
       const dpsXmlGZipB64 = empacotarDps(xmlDps, request.certificado);
 
-      const endpoints = getAdnEndpoints(config.sefazAmbiente);
+      // Mesmo ambiente do tpAmb do DPS (buildDpsXml usa request.ambiente) —
+      // divergir aqui mandaria DPS de homologação pro endpoint de produção.
+      const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
+      const endpoints = getAdnEndpoints(ambienteEfetivo);
 
       const { status, data } = await httpRequest(
         'POST',
@@ -543,7 +546,8 @@ export class NacionalProvider implements INfseProvider {
 
   async consultar(request: NfseConsultarNfseRequest): Promise<NfseResponse> {
     try {
-      const endpoints = getAdnEndpoints(config.sefazAmbiente);
+      const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
+      const endpoints = getAdnEndpoints(ambienteEfetivo);
 
       const params = new URLSearchParams();
       params.set('CNPJ', apenasNumeros(request.prestador.cnpj));
@@ -551,7 +555,7 @@ export class NacionalProvider implements INfseProvider {
       if (request.numero) params.set('nNFSe', String(request.numero));
       if (request.dataInicial) params.set('dhEmiIni', request.dataInicial);
       if (request.dataFinal) params.set('dhEmiFim', request.dataFinal);
-      params.set('tpAmb', config.sefazAmbiente === 'producao' ? '1' : '2');
+      params.set('tpAmb', ambienteEfetivo === 'producao' ? '1' : '2');
 
       const url = `${endpoints.consultar}?${params.toString()}`;
       const { status, data } = await httpRequest('GET', url, request.certificado);
