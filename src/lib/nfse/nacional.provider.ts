@@ -304,7 +304,8 @@ export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): st
     // XSD: tribISSQN → tpRetISSQN
     const tribMun = trib.ele(ns, 'tribMun');
     tribMun.ele(ns, 'tribISSQN').txt(tribISSQN);
-    tribMun.ele(ns, 'tpRetISSQN').txt(v.issRetido ? '1' : '2');
+    // tpRetISSQN (layout nacional): 1=Não Retido, 2=Retido pelo Tomador
+    tribMun.ele(ns, 'tpRetISSQN').txt(v.issRetido ? '2' : '1');
   } else {
     // ═══ REGIME NORMAL → <tribMun> ═══
     // XSD tribMun: tribISSQN → cPaisResult? → pAliq → tpRetISSQN
@@ -314,7 +315,8 @@ export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): st
       tribMun.ele(ns, 'cPaisResult').txt(request.servico.codigoPaisPrestacao);
     }
     tribMun.ele(ns, 'pAliq').txt(formatarValor(v.aliquotaIss * 100, 4));
-    tribMun.ele(ns, 'tpRetISSQN').txt(v.issRetido ? '1' : '2');
+    // tpRetISSQN (layout nacional): 1=Não Retido, 2=Retido pelo Tomador
+    tribMun.ele(ns, 'tpRetISSQN').txt(v.issRetido ? '2' : '1');
   }
 
   // totTrib é OBRIGATÓRIO dentro de <trib> conforme XSD

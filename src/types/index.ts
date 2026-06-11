@@ -351,6 +351,10 @@ export interface SefazResponse {
   dataRecebimento?: string;
   xml?: string; // XML autorizado (assinado + protocolo)
   erros?: string[];
+  /** Fragmento <protNFe> literal extraído da resposta SOAP da SEFAZ.
+   *  Uso interno para montar o nfeProc com o protocolo real (verAplic/digVal);
+   *  removido da resposta antes de devolver ao cliente. */
+  protNFeXml?: string;
 }
 
 export interface MdfeEncerrarRequest {

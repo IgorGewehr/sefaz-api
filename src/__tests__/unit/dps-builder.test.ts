@@ -350,16 +350,17 @@ describe('buildDpsXml — valores', () => {
     expect(xml).toContain('<vServ>1000.00</vServ>');
   });
 
-  it('tpRetISSQN=2 quando ISS não retido', () => {
+  // Layout nacional: tpRetISSQN 1=Não Retido, 2=Retido pelo Tomador
+  it('tpRetISSQN=1 quando ISS não retido', () => {
     const xml = buildDpsXml(makeRequest());
-    expect(xml).toContain('<tpRetISSQN>2</tpRetISSQN>');
+    expect(xml).toContain('<tpRetISSQN>1</tpRetISSQN>');
   });
 
-  it('tpRetISSQN=1 quando ISS retido', () => {
+  it('tpRetISSQN=2 quando ISS retido', () => {
     const req = makeRequest();
     req.valores.issRetido = true;
     const xml = buildDpsXml(req);
-    expect(xml).toContain('<tpRetISSQN>1</tpRetISSQN>');
+    expect(xml).toContain('<tpRetISSQN>2</tpRetISSQN>');
   });
 });
 

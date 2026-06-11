@@ -397,23 +397,40 @@ function parseRetAutorizacao(retorno: any): SefazResponse {
  * O <nfeProc> agrupa <NFe> + <protNFe> e é o formato salvo pelo emissor
  * após autorização — necessário para geração do DANFE.
  */
-function buildNfeProcEnvelope(signedXml: string, resultado: SefazResponse, tpAmb: '1' | '2'): string {
-  return (
-    `<nfeProc versao="4.00" xmlns="${SEFAZ_NS}">` +
-    signedXml +
+/** Exportada para testes unitários (pura, sem I/O). */
+export function buildNfeProcEnvelope(signedXml: string, resultado: SefazResponse, tpAmb: '1' | '2'): string {
+  // O XML assinado carrega o prólogo <?xml?> — não pode aparecer no meio do
+  // nfeProc (documento ficaria malformado para qualquer parser estrito).
+  const nfeMatch = signedXml.match(/<NFe[\s>][\s\S]*<\/NFe>/);
+  const nfeContent = nfeMatch ? nfeMatch[0] : signedXml.replace(/<\?xml[^>]*\?>\s*/, '');
+
+  // protNFe literal retornado pela SEFAZ (verAplic/digVal reais). O fallback
+  // reconstruído só cobre resposta sem o fragmento — sem verAplic/digVal
+  // oficiais o documento não é o protocolo registrado, mas continua well-formed.
+  const protNFe =
+    resultado.protNFeXml ||
     `<protNFe versao="4.00">` +
-    `<infProt>` +
-    `<tpAmb>${tpAmb}</tpAmb>` +
-    `<verAplic>SefazAPI-1.0</verAplic>` +
-    `<chNFe>${resultado.chaveAcesso || ''}</chNFe>` +
-    `<dhRecbto>${resultado.dataRecebimento || ''}</dhRecbto>` +
-    `<nProt>${resultado.protocolo || ''}</nProt>` +
-    `<cStat>${resultado.codigoStatus}</cStat>` +
-    `<xMotivo>${escapeXml(resultado.motivoStatus)}</xMotivo>` +
-    `</infProt>` +
-    `</protNFe>` +
-    `</nfeProc>`
-  );
+      `<infProt>` +
+      `<tpAmb>${tpAmb}</tpAmb>` +
+      `<verAplic>SefazAPI-1.0</verAplic>` +
+      `<chNFe>${resultado.chaveAcesso || ''}</chNFe>` +
+      `<dhRecbto>${resultado.dataRecebimento || ''}</dhRecbto>` +
+      `<nProt>${resultado.protocolo || ''}</nProt>` +
+      `<cStat>${resultado.codigoStatus}</cStat>` +
+      `<xMotivo>${escapeXml(resultado.motivoStatus)}</xMotivo>` +
+      `</infProt>` +
+      `</protNFe>`;
+
+  return `<nfeProc versao="4.00" xmlns="${SEFAZ_NS}">` + nfeContent + protNFe + `</nfeProc>`;
+}
+
+/**
+ * Extrai o fragmento <protNFe> literal da resposta SOAP da SEFAZ.
+ * Usado para montar o nfeProc com o protocolo oficial em vez de reconstruí-lo.
+ */
+export function extrairProtNFe(soapXml: string): string | undefined {
+  const m = soapXml.match(/<protNFe[\s>][\s\S]*?<\/protNFe>/);
+  return m ? m[0] : undefined;
 }
 
 /**
@@ -484,6 +501,9 @@ function gerarChaveENumero(params: {
  * Emite uma NFe (modelo 55) - assíncrono com polling
  */
 export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
+  // Disponível no catch: se a chave já foi gerada antes do erro, devolvê-la
+  // permite ao emissor consultar/recuperar a nota em vez de re-emitir às cegas.
+  let chaveGerada: string | undefined;
   try {
     // VALIDAÇÃO ANTES DE GERAR XML
     const validationErrors = validateNFePayload(request);
@@ -509,6 +529,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
       serie,
       numero: request.numero,
     });
+    chaveGerada = chaveAcesso;
 
     // 2. Construir o XML da NFe
     const nfeXml = buildNFeXml(request, chaveAcesso, numero, tpAmb);
@@ -532,6 +553,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
     // 6. Parsear resposta inicial
     const retorno = extrairRetorno(soapResponse);
     const resultado = parseRetAutorizacao(retorno);
+    resultado.protNFeXml = extrairProtNFe(soapResponse);
 
     // 7. Se está processando, fazer polling
     if (resultado.status === 'processando' && resultado.nRec) {
@@ -543,9 +565,14 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
         request.certificado,
       );
 
-      // Complementar com a chave de acesso gerada caso não tenha vindo no retorno
-      if (pollingResult.success && !pollingResult.chaveAcesso) {
+      // Chave gerada localmente (cNF aleatório) volta em TODOS os caminhos —
+      // timeout/processando sem ela deixaria o emissor sem como consultar uma
+      // nota que a SEFAZ pode ter autorizado.
+      if (!pollingResult.chaveAcesso) {
         pollingResult.chaveAcesso = chaveAcesso;
+      }
+      if (!pollingResult.nRec) {
+        pollingResult.nRec = nRec;
       }
 
       // Incluir XML autorizado (nfeProc) na resposta se autorizado
@@ -553,17 +580,19 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
         pollingResult.xml = buildNfeProcEnvelope(signedXml, pollingResult, tpAmb);
       }
 
+      delete pollingResult.protNFeXml;
       return pollingResult;
     }
 
     // Se já tem resultado definitivo
+    if (!resultado.chaveAcesso) {
+      resultado.chaveAcesso = chaveAcesso;
+    }
     if (resultado.success) {
-      if (!resultado.chaveAcesso) {
-        resultado.chaveAcesso = chaveAcesso;
-      }
       resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
     }
 
+    delete resultado.protNFeXml;
     return resultado;
   } catch (error: any) {
     return {
@@ -572,6 +601,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
       codigoStatus: 'ERR',
       motivoStatus: error.message || 'Erro desconhecido ao emitir NFe',
       erros: [error.message],
+      chaveAcesso: chaveGerada,
     };
   }
 }
@@ -609,6 +639,7 @@ async function pollRetAutorizacao(
 
       const retorno = extrairRetorno(soapResponse);
       const resultado = parseRetAutorizacao(retorno);
+      resultado.protNFeXml = extrairProtNFe(soapResponse);
 
       // Se não está mais processando, retornar
       if (resultado.status !== 'processando') {
@@ -617,12 +648,16 @@ async function pollRetAutorizacao(
     } catch (error: any) {
       // Continuar tentando em caso de erro transitório
       if (attempt === MAX_POLLING_ATTEMPTS - 1) {
+        // O lote JÁ foi recebido pela SEFAZ (temos nRec) — a nota pode ter
+        // sido autorizada. 'processando' (não 'erro') faz o emissor commitar
+        // o número e consultar depois, em vez de reusar o nNF (rejeição 539).
         return {
           success: false,
-          status: 'erro',
+          status: 'processando',
           codigoStatus: 'TIMEOUT',
-          motivoStatus: `Timeout ao consultar retorno após ${MAX_POLLING_ATTEMPTS} tentativas: ${error.message}`,
+          motivoStatus: `Lote recebido (nRec ${nRec}), mas a consulta do resultado falhou após ${MAX_POLLING_ATTEMPTS} tentativas: ${error.message}. Consulte pela chave de acesso.`,
           erros: [error.message],
+          nRec,
         };
       }
     }
@@ -633,6 +668,7 @@ async function pollRetAutorizacao(
     status: 'processando',
     codigoStatus: '105',
     motivoStatus: 'Lote ainda em processamento após todas as tentativas de polling',
+    nRec,
   };
 }
 
@@ -819,7 +855,23 @@ function validateNFCePayload(req: NFCeRequest): string[] {
  * Emite uma NFCe (modelo 65) - síncrono (indSinc=1)
  */
 export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
+  let chaveGerada: string | undefined;
   try {
+    // Guarda: payload com `contingencia` aqui geraria chave com tpEmis=1 e
+    // XML com tpEmis=9 (buildNFCeXml lê request.contingencia) → rejeição 502
+    // garantida. Contingência off-line tem endpoint próprio.
+    if (request.contingencia) {
+      return {
+        success: false,
+        status: 'erro',
+        codigoStatus: '400',
+        motivoStatus:
+          'Payload com `contingencia` não é aceito em /nfce/emitir (emissão normal, tpEmis=1). ' +
+          'Use /nfe/nfce/contingencia/prepare para contingência off-line.',
+        erros: ['contingencia presente em emissão normal'],
+      };
+    }
+
     // VALIDAÇÃO ANTES DE GERAR XML
     const validationErrors = validateNFCePayload(request);
     if (validationErrors.length > 0) {
@@ -844,6 +896,7 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
       serie,
       numero: request.numero,
     });
+    chaveGerada = chaveAcesso;
 
     // 2. Construir o XML da NFCe
     const nfceXml = buildNFCeXml(request, chaveAcesso, numero, tpAmb);
@@ -871,14 +924,17 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
     // 7. Parsear resposta (síncrona - resultado imediato)
     const retorno = extrairRetorno(soapResponse);
     const resultado = parseRetAutorizacao(retorno);
+    resultado.protNFeXml = extrairProtNFe(soapResponse);
 
+    // Chave gerada localmente volta em TODOS os caminhos (ver emitirNFe).
+    if (!resultado.chaveAcesso) {
+      resultado.chaveAcesso = chaveAcesso;
+    }
     if (resultado.success) {
-      if (!resultado.chaveAcesso) {
-        resultado.chaveAcesso = chaveAcesso;
-      }
       resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
     }
 
+    delete resultado.protNFeXml;
     return resultado;
   } catch (error: any) {
     return {
@@ -887,6 +943,7 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
       codigoStatus: 'ERR',
       motivoStatus: error.message || 'Erro desconhecido ao emitir NFCe',
       erros: [error.message],
+      chaveAcesso: chaveGerada,
     };
   }
 }
@@ -990,11 +1047,20 @@ export async function transmitirNFCeContingencia(
 
     const retorno = extrairRetorno(soapResponse);
     const resultado = parseRetAutorizacao(retorno);
+    resultado.protNFeXml = extrairProtNFe(soapResponse);
+
+    // Chave vem do XML assinado (Id="NFe<44 dígitos>") — devolver mesmo em
+    // rejeição/timeout para o emissor manter o vínculo com o doc local.
+    if (!resultado.chaveAcesso) {
+      const idMatch = signedXml.match(/Id="NFe(\d{44})"/);
+      if (idMatch) resultado.chaveAcesso = idMatch[1];
+    }
 
     if (resultado.success) {
       resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
     }
 
+    delete resultado.protNFeXml;
     return resultado;
   } catch (error: any) {
     return {

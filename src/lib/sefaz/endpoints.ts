@@ -171,13 +171,15 @@ const NFE_GO_PRODUCAO: WebServices = {
   recepcaoEvento: 'https://nfe.sefaz.go.gov.br/nfe/services/NFeRecepcaoEvento4?wsdl',
 };
 
+// Host conferido contra sped-nfe wsnfe_4.00_mod55.xml: homolog.sefaz.go.gov.br
+// (o antigo homologacao.sefaz.go.gov.br + ?wsdl divergia da fonte oficial).
 const NFE_GO_HOMOLOGACAO: WebServices = {
-  autorizacao: 'https://homologacao.sefaz.go.gov.br/nfe/services/NFeAutorizacao4?wsdl',
-  retAutorizacao: 'https://homologacao.sefaz.go.gov.br/nfe/services/NFeRetAutorizacao4?wsdl',
-  consultaProtocolo: 'https://homologacao.sefaz.go.gov.br/nfe/services/NFeConsultaProtocolo4?wsdl',
-  statusServico: 'https://homologacao.sefaz.go.gov.br/nfe/services/NFeStatusServico4?wsdl',
-  inutilizacao: 'https://homologacao.sefaz.go.gov.br/nfe/services/NFeInutilizacao4?wsdl',
-  recepcaoEvento: 'https://homologacao.sefaz.go.gov.br/nfe/services/NFeRecepcaoEvento4?wsdl',
+  autorizacao: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeAutorizacao4',
+  retAutorizacao: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeConsultaProtocolo4',
+  statusServico: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeStatusServico4',
+  inutilizacao: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeInutilizacao4',
+  recepcaoEvento: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeRecepcaoEvento4',
 };
 
 const NFE_BA_PRODUCAO: WebServices = {
@@ -324,18 +326,137 @@ const NFCE_RS_HOMOLOGACAO: WebServices = {
   recepcaoEvento: 'https://nfce-homologacao.sefazrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx',
 };
 
-// Mapeamento NFCe
+// Estados com autorizador NFC-e próprio (≠ SVRS). URLs conferidas contra
+// nfephp-org/sped-nfe storage/wsnfe_4.00_mod65.xml (2026-06).
+const NFCE_AM_PRODUCAO: WebServices = {
+  autorizacao: 'https://nfce.sefaz.am.gov.br/nfce-services/services/NfeAutorizacao4',
+  retAutorizacao: 'https://nfce.sefaz.am.gov.br/nfce-services/services/NfeRetAutorizacao4',
+  consultaProtocolo: 'https://nfce.sefaz.am.gov.br/nfce-services/services/NfeConsulta4',
+  statusServico: 'https://nfce.sefaz.am.gov.br/nfce-services/services/NfeStatusServico4',
+  inutilizacao: 'https://nfce.sefaz.am.gov.br/nfce-services/services/NfeInutilizacao4',
+  recepcaoEvento: 'https://nfce.sefaz.am.gov.br/nfce-services/services/RecepcaoEvento4',
+};
+
+const NFCE_AM_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://homnfce.sefaz.am.gov.br/nfce-services/services/NfeAutorizacao4',
+  retAutorizacao: 'https://homnfce.sefaz.am.gov.br/nfce-services/services/NfeRetAutorizacao4',
+  consultaProtocolo: 'https://homnfce.sefaz.am.gov.br/nfce-services/services/NfeConsulta4',
+  statusServico: 'https://homnfce.sefaz.am.gov.br/nfce-services/services/NfeStatusServico4',
+  inutilizacao: 'https://homnfce.sefaz.am.gov.br/nfce-services/services/NfeInutilizacao4',
+  recepcaoEvento: 'https://homnfce.sefaz.am.gov.br/nfce-services/services/RecepcaoEvento4',
+};
+
+// GO: NFC-e compartilha a infraestrutura da NF-e estadual
+const NFCE_GO_PRODUCAO: WebServices = {
+  autorizacao: 'https://nfe.sefaz.go.gov.br/nfe/services/NFeAutorizacao4',
+  retAutorizacao: 'https://nfe.sefaz.go.gov.br/nfe/services/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://nfe.sefaz.go.gov.br/nfe/services/NFeConsultaProtocolo4',
+  statusServico: 'https://nfe.sefaz.go.gov.br/nfe/services/NFeStatusServico4',
+  inutilizacao: 'https://nfe.sefaz.go.gov.br/nfe/services/NFeInutilizacao4',
+  recepcaoEvento: 'https://nfe.sefaz.go.gov.br/nfe/services/NFeRecepcaoEvento4',
+};
+
+const NFCE_GO_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeAutorizacao4',
+  retAutorizacao: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeConsultaProtocolo4',
+  statusServico: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeStatusServico4',
+  inutilizacao: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeInutilizacao4',
+  recepcaoEvento: 'https://homolog.sefaz.go.gov.br/nfe/services/NFeRecepcaoEvento4',
+};
+
+const NFCE_MT_PRODUCAO: WebServices = {
+  autorizacao: 'https://nfce.sefaz.mt.gov.br/nfcews/services/NfeAutorizacao4',
+  retAutorizacao: 'https://nfce.sefaz.mt.gov.br/nfcews/services/NfeRetAutorizacao4',
+  consultaProtocolo: 'https://nfce.sefaz.mt.gov.br/nfcews/services/NfeConsulta4',
+  statusServico: 'https://nfce.sefaz.mt.gov.br/nfcews/services/NfeStatusServico4',
+  inutilizacao: 'https://nfce.sefaz.mt.gov.br/nfcews/services/NfeInutilizacao4',
+  recepcaoEvento: 'https://nfce.sefaz.mt.gov.br/nfcews/services/RecepcaoEvento4',
+};
+
+const NFCE_MT_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://homologacao.sefaz.mt.gov.br/nfcews/services/NfeAutorizacao4',
+  retAutorizacao: 'https://homologacao.sefaz.mt.gov.br/nfcews/services/NfeRetAutorizacao4',
+  consultaProtocolo: 'https://homologacao.sefaz.mt.gov.br/nfcews/services/NfeConsulta4',
+  statusServico: 'https://homologacao.sefaz.mt.gov.br/nfcews/services/NfeStatusServico4',
+  inutilizacao: 'https://homologacao.sefaz.mt.gov.br/nfcews/services/NfeInutilizacao4',
+  recepcaoEvento: 'https://homologacao.sefaz.mt.gov.br/nfcews/services/RecepcaoEvento4',
+};
+
+const NFCE_MS_PRODUCAO: WebServices = {
+  autorizacao: 'https://nfce.sefaz.ms.gov.br/ws/NFeAutorizacao4',
+  retAutorizacao: 'https://nfce.sefaz.ms.gov.br/ws/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://nfce.sefaz.ms.gov.br/ws/NFeConsultaProtocolo4',
+  statusServico: 'https://nfce.sefaz.ms.gov.br/ws/NFeStatusServico4',
+  inutilizacao: 'https://nfce.sefaz.ms.gov.br/ws/NFeInutilizacao4',
+  recepcaoEvento: 'https://nfce.sefaz.ms.gov.br/ws/NFeRecepcaoEvento4',
+};
+
+const NFCE_MS_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://hom.nfce.sefaz.ms.gov.br/ws/NFeAutorizacao4',
+  retAutorizacao: 'https://hom.nfce.sefaz.ms.gov.br/ws/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://hom.nfce.sefaz.ms.gov.br/ws/NFeConsultaProtocolo4',
+  statusServico: 'https://hom.nfce.sefaz.ms.gov.br/ws/NFeStatusServico4',
+  inutilizacao: 'https://hom.nfce.sefaz.ms.gov.br/ws/NFeInutilizacao4',
+  recepcaoEvento: 'https://hom.nfce.sefaz.ms.gov.br/ws/NFeRecepcaoEvento4',
+};
+
+const NFCE_PR_PRODUCAO: WebServices = {
+  autorizacao: 'https://nfce.sefa.pr.gov.br/nfce/NFeAutorizacao4',
+  retAutorizacao: 'https://nfce.sefa.pr.gov.br/nfce/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://nfce.sefa.pr.gov.br/nfce/NFeConsultaProtocolo4',
+  statusServico: 'https://nfce.sefa.pr.gov.br/nfce/NFeStatusServico4',
+  inutilizacao: 'https://nfce.sefa.pr.gov.br/nfce/NFeInutilizacao4',
+  recepcaoEvento: 'https://nfce.sefa.pr.gov.br/nfce/NFeRecepcaoEvento4',
+};
+
+const NFCE_PR_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://homologacao.nfce.sefa.pr.gov.br/nfce/NFeAutorizacao4',
+  retAutorizacao: 'https://homologacao.nfce.sefa.pr.gov.br/nfce/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://homologacao.nfce.sefa.pr.gov.br/nfce/NFeConsultaProtocolo4',
+  statusServico: 'https://homologacao.nfce.sefa.pr.gov.br/nfce/NFeStatusServico4',
+  inutilizacao: 'https://homologacao.nfce.sefa.pr.gov.br/nfce/NFeInutilizacao4',
+  recepcaoEvento: 'https://homologacao.nfce.sefa.pr.gov.br/nfce/NFeRecepcaoEvento4',
+};
+
+const NFCE_MG_PRODUCAO: WebServices = {
+  autorizacao: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeAutorizacao4',
+  retAutorizacao: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeConsultaProtocolo4',
+  statusServico: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeStatusServico4',
+  inutilizacao: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeInutilizacao4',
+  recepcaoEvento: 'https://nfce.fazenda.mg.gov.br/nfce/services/NFeRecepcaoEvento4',
+};
+
+const NFCE_MG_HOMOLOGACAO: WebServices = {
+  autorizacao: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeAutorizacao4',
+  retAutorizacao: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeRetAutorizacao4',
+  consultaProtocolo: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeConsultaProtocolo4',
+  statusServico: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeStatusServico4',
+  inutilizacao: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeInutilizacao4',
+  recepcaoEvento: 'https://hnfce.fazenda.mg.gov.br/nfce/services/NFeRecepcaoEvento4',
+};
+
+// Mapeamento NFCe — AM/GO/MT/MS/PR/MG têm autorizador NFC-e próprio; roteá-los
+// para SVRS causa rejeição 226 (UF do emitente diverge da UF autorizadora).
 const NFCE_ENDPOINTS: Record<string, Record<Ambiente, WebServices>> = {
-  SP: { producao: NFCE_SP_PRODUCAO, homologacao: NFCE_SP_HOMOLOGACAO },
-  RS: { producao: NFCE_RS_PRODUCAO, homologacao: NFCE_RS_HOMOLOGACAO },
-  // Demais estados usam SVRS
+  // SVRS primeiro: as entradas explícitas abaixo SEMPRE vencem o spread,
+  // mesmo se alguém recolocar uma UF na lista por engano.
   ...Object.fromEntries(
-    ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT',
-     'PA','PB','PE','PI','PR','RJ','RN','RO','RR','SC','SE','TO'].map(uf => [
+    ['AC','AL','AP','BA','CE','DF','ES','MA',
+     'PA','PB','PE','PI','RJ','RN','RO','RR','SC','SE','TO'].map(uf => [
       uf,
       { producao: NFCE_SVRS_PRODUCAO, homologacao: NFCE_SVRS_HOMOLOGACAO }
     ])
   ),
+  SP: { producao: NFCE_SP_PRODUCAO, homologacao: NFCE_SP_HOMOLOGACAO },
+  RS: { producao: NFCE_RS_PRODUCAO, homologacao: NFCE_RS_HOMOLOGACAO },
+  AM: { producao: NFCE_AM_PRODUCAO, homologacao: NFCE_AM_HOMOLOGACAO },
+  GO: { producao: NFCE_GO_PRODUCAO, homologacao: NFCE_GO_HOMOLOGACAO },
+  MT: { producao: NFCE_MT_PRODUCAO, homologacao: NFCE_MT_HOMOLOGACAO },
+  MS: { producao: NFCE_MS_PRODUCAO, homologacao: NFCE_MS_HOMOLOGACAO },
+  PR: { producao: NFCE_PR_PRODUCAO, homologacao: NFCE_PR_HOMOLOGACAO },
+  MG: { producao: NFCE_MG_PRODUCAO, homologacao: NFCE_MG_HOMOLOGACAO },
 };
 
 // ============================================================
