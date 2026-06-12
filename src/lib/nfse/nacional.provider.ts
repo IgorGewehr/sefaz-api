@@ -350,11 +350,12 @@ export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): st
     // TSDec2V2: máximo 2 inteiros + 2 decimais (ex: "5.00")
     totTrib.ele(ns, 'pTotTribSN').txt(formatarValor(v.aliquotaIss * 100, 2));
   } else {
-    // Regime Normal: usar indTotTrib (indicador de tributação total)
-    // 0=Não informado, 1=Informado pelo contribuinte, 2=Calculado pelo sistema
-    const baseCalculo = v.valorServicos - (v.valorDeducoes || 0) - (v.descontoIncondicionado || 0);
-    const valorIss = baseCalculo * v.aliquotaIss;
-    totTrib.ele(ns, 'vTotTrib').txt(formatarValor(valorIss));
+    // Regime Normal: totTrib é um CHOICE no XSD — vTotTrib (complexo, com
+    // vTotTribFed/Est/Mun) OU pTotTrib OU indTotTrib. Emitir vTotTrib como
+    // texto simples + indTotTrib juntos violava o schema (e o valor usado
+    // era o ISS, semanticamente errado: vTotTrib é o total APROXIMADO de
+    // tributos da Lei 12.741, não o ISS). Como não calculamos IBPT,
+    // indTotTrib=0 ("não informado") é a opção válida e honesta.
     totTrib.ele(ns, 'indTotTrib').txt('0');
   }
 

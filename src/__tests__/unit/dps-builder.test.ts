@@ -261,10 +261,12 @@ describe('buildDpsXml — Regime Normal', () => {
     expect(xml).toContain('<pAliq>');
   });
 
-  it('totTrib usa <vTotTrib> e <indTotTrib> no regime normal', () => {
+  it('totTrib usa SÓ <indTotTrib> no regime normal (choice do XSD)', () => {
+    // vTotTrib simples + indTotTrib juntos violava o schema; vTotTrib é o
+    // total aproximado de tributos (Lei 12.741), não o ISS.
     const xml = buildDpsXml(makeNormal());
-    expect(xml).toContain('<vTotTrib>');
-    expect(xml).toContain('<indTotTrib>');
+    expect(xml).toContain('<indTotTrib>0</indTotTrib>');
+    expect(xml).not.toContain('<vTotTrib>');
     expect(xml).not.toContain('<pTotTribSN>');
   });
 });
