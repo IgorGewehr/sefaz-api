@@ -1,4 +1,5 @@
 import * as https from 'https';
+import { getCaBundle, tlsRejectUnauthorized } from './ca-bundle';
 import * as crypto from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { pfxToBuffer } from '../utils';
@@ -56,7 +57,8 @@ function getOrCreateAgent(certificado: CertificateData): https.Agent {
   const agent = new https.Agent({
     pfx,
     passphrase: certificado.password,
-    rejectUnauthorized: false, // ICP-Brasil root CAs are not in Node.js default bundle
+    ca: getCaBundle(),
+    rejectUnauthorized: tlsRejectUnauthorized(),
     minVersion: 'TLSv1.2',
     keepAlive: true,
     keepAliveMsecs: 30000,

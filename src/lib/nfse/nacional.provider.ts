@@ -22,6 +22,7 @@ import type {
 } from '../../types/nfse';
 import { getAdnEndpoints } from './nfse-endpoints';
 import { assinarXml } from '../sefaz/xml-signer';
+import { getCaBundle, tlsRejectUnauthorized } from '../sefaz/ca-bundle';
 import { pfxToBuffer, apenasNumeros, formatarValor, formatarDataSefaz } from '../utils';
 import { config } from '../../config';
 
@@ -53,7 +54,8 @@ async function httpRequest(
     agent = new https.Agent({
       pfx,
       passphrase: certificado.password,
-      rejectUnauthorized: false,
+      ca: getCaBundle(),
+      rejectUnauthorized: tlsRejectUnauthorized(),
       minVersion: 'TLSv1.2',
     });
   } catch (err: any) {

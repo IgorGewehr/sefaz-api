@@ -24,6 +24,11 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 
+# Raízes ICP-Brasil para validação TLS dos webservices SEFAZ (ca-bundle.ts
+# resolve dist/lib/sefaz → ../../../ca = /app/ca). Em ca/ — NÃO em certs/,
+# que o .dockerignore exclui e o volume certs-data do compose esconderia.
+COPY ca/ ./ca/
+
 RUN mkdir -p /app/certs
 
 EXPOSE 3333

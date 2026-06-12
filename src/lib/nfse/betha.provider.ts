@@ -24,6 +24,7 @@ import type {
 } from '../../types/nfse';
 import { buildDpsXml } from './nacional.provider';
 import { assinarXml } from '../sefaz/xml-signer';
+import { getCaBundle, tlsRejectUnauthorized } from '../sefaz/ca-bundle';
 import { extrairBodySoap } from '../sefaz/soap-client';
 import { pfxToBuffer, apenasNumeros, formatarDataSefaz } from '../utils';
 import { config } from '../../config';
@@ -134,7 +135,8 @@ async function enviarSoapBethaCloud(
   const agent = new https.Agent({
     pfx,
     passphrase: certificado.password,
-    rejectUnauthorized: false,
+    ca: getCaBundle(),
+    rejectUnauthorized: tlsRejectUnauthorized(),
     minVersion: 'TLSv1.2',
   });
 
