@@ -367,6 +367,17 @@ export interface MdfeEncerrarRequest {
   ambiente?: 'producao' | 'homologacao';
 }
 
+export interface MdfeIncluirCondutorRequest {
+  chaveAcesso: string;
+  /** Protocolo de autorização — aceito por compat com o cliente, não usado no evento 110114. */
+  protocolo?: string;
+  condutor: { nome: string; cpf: string };
+  /** Sequência do evento (1-99) — incrementar a cada condutor incluído na mesma chave. */
+  nSeqEvento?: number;
+  certificado: CertificateData;
+  ambiente?: 'producao' | 'homologacao';
+}
+
 export interface MdfeCancelarRequest {
   chaveAcesso: string;
   protocolo: string;

@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import * as mdfeService from '../services/mdfe.service';
-import { validarCNPJ, validarChaveAcesso, parsePfx, certCnpjBate } from '../lib/utils';
+import { validarCNPJ, validarCPF, validarChaveAcesso, parsePfx, certCnpjBate } from '../lib/utils';
 import { config } from '../config';
 import type {
   MdfeRequest,
   MdfeEncerrarRequest,
   MdfeCancelarRequest,
+  MdfeIncluirCondutorRequest,
   CertificateData,
 } from '../types';
 
@@ -146,6 +147,42 @@ router.post('/encerrar', async (req: Request, res: Response) => {
     res.status(statusCode).json(result);
   } catch (err: any) {
     console.error('[MDF-e] Erro ao encerrar:', err.message);
+    res.status(500).json({ error: 'Erro interno ao processar a requisição' });
+  }
+});
+
+// POST /mdfe/incluir-condutor - Incluir condutor (evento 110114)
+router.post('/incluir-condutor', async (req: Request, res: Response) => {
+  try {
+    const data: MdfeIncluirCondutorRequest = req.body;
+
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso (44 dígitos) é obrigatória' });
+      return;
+    }
+    if (!data.condutor?.nome || !data.condutor?.cpf) {
+      res.status(400).json({ error: 'condutor (nome + cpf) é obrigatório' });
+      return;
+    }
+    if (!validarCPF(data.condutor.cpf)) {
+      res.status(400).json({ error: 'CPF do condutor inválido (DV incorreto)' });
+      return;
+    }
+    if (data.nSeqEvento !== undefined && (data.nSeqEvento < 1 || data.nSeqEvento > 99)) {
+      res.status(400).json({ error: 'nSeqEvento deve estar entre 1 e 99' });
+      return;
+    }
+    if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
+      res.status(400).json({ error: 'Certificado digital é obrigatório' });
+      return;
+    }
+    if (certMismatch(res, data.certificado, data.chaveAcesso.substring(6, 20))) return;
+
+    const result = await mdfeService.incluirCondutorMdfe(data);
+    const statusCode = result.success ? 200 : 422;
+    res.status(statusCode).json(result);
+  } catch (err: any) {
+    console.error('[MDF-e] Erro ao incluir condutor:', err.message);
     res.status(500).json({ error: 'Erro interno ao processar a requisição' });
   }
 });

@@ -154,6 +154,23 @@ async function httpRequest(
 //   O governo calcula alíquota e ISS internamente pelo DAS.
 // ============================================================
 
+// ── Id do DPS ── TSIdDPS: "DPS"(3) + 42 dígitos = 45 chars
+// Composição: DPS + cLocEmi(7) + tpInsc(1 díg, "2"=CNPJ) + CNPJ(14) + serie(5) + nDPS(15)
+// Mesmo Id usado na infDPS da emissão e no GET /dps/{idDps} da SEFIN —
+// helper compartilhado para a derivação nunca divergir entre os dois fluxos.
+export function montarIdDps(params: {
+  codigoMunicipio: string;
+  cnpj: string;
+  serie: string;
+  numero: number | string;
+}): string {
+  // Série: ADN exige valor numérico. Legados alfanuméricos → "1"
+  const serieNumerica = /^\d+$/.test(params.serie) ? params.serie : '1';
+  const cLocEmi = apenasNumeros(params.codigoMunicipio).padStart(7, '0');
+  const cnpj = apenasNumeros(params.cnpj).padStart(14, '0');
+  return `DPS${cLocEmi}2${cnpj}${serieNumerica.padStart(5, '0')}${String(params.numero).padStart(15, '0')}`;
+}
+
 export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): string {
   const cnpj = apenasNumeros(request.prestador.cnpj);
   const v = request.valores;
@@ -167,10 +184,12 @@ export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): st
   // Série: ADN exige valor numérico. Legados alfanuméricos → "1"
   const serieNumerica = /^\d+$/.test(request.rps.serie) ? request.rps.serie : '1';
 
-  // ── Id da infDPS ── TSIdDPS: "DPS"(3) + 42 dígitos = 45 chars
-  // Composição: DPS + cLocEmi(7) + tpInsc(1) + CNPJ(14) + serie(5) + nDPS(15)
-  const cLocEmiVal = request.servico.codigoMunicipioPrestacao.padStart(7, '0');
-  const infDpsId = `DPS${cLocEmiVal}2${cnpj.padStart(14, '0')}${serieNumerica.padStart(5, '0')}${String(request.rps.numero).padStart(15, '0')}`;
+  const infDpsId = montarIdDps({
+    codigoMunicipio: request.servico.codigoMunicipioPrestacao,
+    cnpj,
+    serie: serieNumerica,
+    numero: request.rps.numero,
+  });
 
   // ADN (SEFAZ) usa 'Id' maiúsculo (padrão XML Signature)
   // Betha Cloud usa 'id' minúsculo (conforme XSD próprio)
@@ -348,13 +367,122 @@ export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): st
 }
 
 // ============================================================
+// XML Builder: Evento de Cancelamento (e101101)
+//
+// Contrato SEFIN Nacional (pedRegEvento v1.00, tiposEventos_v1.00.xsd):
+//
+// <pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
+//   <infPedReg Id="PRE{chave50}{101101}">   ← TSIdPedRefEvt: PRE[0-9]{56}
+//     1. tpAmb
+//     2. verAplic
+//     3. dhEvento                            ← TSDateTimeUTC
+//     4. CNPJAutor | CPFAutor
+//     5. chNFSe                              ← TSChaveNFSe: [0-9]{50}
+//     6. e101101
+//        └─ xDesc   (fixo "Cancelamento de NFS-e")
+//        └─ cMotivo (TSCodJustCanc: 1=Erro emissão, 2=Serviço não prestado, 9=Outros)
+//        └─ xMotivo (TSMotivo: 15–255 chars)
+//   </infPedReg>
+//   <Signature/>                             ← assinatura do infPedReg
+// </pedRegEvento>
+//
+// Esteira: assinar infPedReg → GZip → Base64 →
+// POST {sefin}/nfse/{chave}/eventos  { "pedidoRegistroEventoXmlGZipB64": "..." }
+// ============================================================
+
+const EVENTO_CANCELAMENTO = '101101';
+
+/**
+ * Mapeia o código de cancelamento do contrato público (1–4, legado ABRASF)
+ * para o TSCodJustCanc do Padrão Nacional (1|2|9) e garante xMotivo válido
+ * (TSMotivo: mínimo 15, máximo 255 caracteres).
+ */
+export function montarMotivoCancelamento(
+  codigoCancelamento: string,
+  motivo?: string,
+): { cMotivo: '1' | '2' | '9'; xMotivo: string } {
+  const cMotivo: '1' | '2' | '9' =
+    codigoCancelamento === '1' ? '1'
+    : codigoCancelamento === '2' ? '2'
+    : '9'; // 3=Duplicidade, 4=Erro de processamento → "Outros" no Padrão Nacional
+
+  const fallback: Record<'1' | '2' | '9', string> = {
+    '1': 'Cancelamento por erro na emissao da NFS-e',
+    '2': 'Cancelamento por servico nao prestado',
+    '9': 'Cancelamento por outros motivos',
+  };
+
+  const informado = (motivo || '').trim();
+  const xMotivo = informado.length >= 15 ? informado.slice(0, 255) : fallback[cMotivo];
+  return { cMotivo, xMotivo };
+}
+
+export function buildEventoCancelamentoXml(params: {
+  chaveAcesso: string;
+  /** CNPJ (14 díg) ou CPF (11 díg) do autor do evento */
+  documentoAutor: string;
+  cMotivo: '1' | '2' | '9';
+  xMotivo: string;
+  ambiente: 'producao' | 'homologacao';
+}): string {
+  const chave = apenasNumeros(params.chaveAcesso);
+  if (chave.length !== 50) {
+    throw new Error(`Chave de acesso da NFS-e deve ter 50 dígitos (recebido: ${chave.length})`);
+  }
+
+  const docAutor = apenasNumeros(params.documentoAutor);
+  if (docAutor.length !== 14 && docAutor.length !== 11) {
+    throw new Error('Documento do autor do evento deve ser CNPJ (14 díg) ou CPF (11 díg)');
+  }
+
+  // TSIdPedRefEvt: "PRE" + chave(50) + tpEvento(6) = 59 chars (PRE[0-9]{56})
+  const idPedReg = `PRE${chave}${EVENTO_CANCELAMENTO}`;
+
+  // xmlbuilder2 escapa &, <, >, " e ' em .txt() — xMotivo livre de injection.
+  const doc = create({ version: '1.0', encoding: 'UTF-8' });
+  const ped = doc.ele(DPS_NS, 'pedRegEvento').att('versao', '1.00');
+  const inf = ped.ele(DPS_NS, 'infPedReg').att('Id', idPedReg);
+
+  inf.ele(DPS_NS, 'tpAmb').txt(params.ambiente === 'producao' ? '1' : '2');
+  inf.ele(DPS_NS, 'verAplic').txt('sefaz-api-1.0');
+  inf.ele(DPS_NS, 'dhEvento').txt(formatarDataSefaz());
+  inf.ele(DPS_NS, docAutor.length === 14 ? 'CNPJAutor' : 'CPFAutor').txt(docAutor);
+  inf.ele(DPS_NS, 'chNFSe').txt(chave);
+
+  const evento = inf.ele(DPS_NS, 'e101101');
+  evento.ele(DPS_NS, 'xDesc').txt('Cancelamento de NFS-e');
+  evento.ele(DPS_NS, 'cMotivo').txt(params.cMotivo);
+  evento.ele(DPS_NS, 'xMotivo').txt(params.xMotivo);
+
+  return doc.end({ prettyPrint: false });
+}
+
+// ============================================================
 // Esteira: XML → Assinar → GZip → Base64
 // ============================================================
 
+export function gzipBase64(xml: string): string {
+  return zlib.gzipSync(Buffer.from(xml, 'utf-8')).toString('base64');
+}
+
 function empacotarDps(xmlDps: string, certificado: CertificateData): string {
   const xmlAssinado = assinarXml(xmlDps, certificado, 'infDPS');
-  const gzipped = zlib.gzipSync(Buffer.from(xmlAssinado, 'utf-8'));
-  return gzipped.toString('base64');
+  return gzipBase64(xmlAssinado);
+}
+
+function empacotarEvento(xmlEvento: string, certificado: CertificateData): string {
+  const xmlAssinado = assinarXml(xmlEvento, certificado, 'infPedReg');
+  return gzipBase64(xmlAssinado);
+}
+
+/** Descompacta resposta da SEFIN ({nfse,evento}XmlGZipB64). null se inválido. */
+function tryGunzipBase64(b64: unknown): string | null {
+  if (typeof b64 !== 'string' || !b64) return null;
+  try {
+    return zlib.gunzipSync(Buffer.from(b64, 'base64')).toString('utf-8');
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================
@@ -510,80 +638,186 @@ export class NacionalProvider implements INfseProvider {
 
   async cancelar(request: NfseCancelarRequest): Promise<NfseResponse> {
     try {
+      const chave = apenasNumeros(request.chaveNFSe || '');
+      if (chave.length !== 50) {
+        return {
+          success: false,
+          status: 'erro',
+          mensagens: [{
+            codigo: '0',
+            mensagem: 'chaveNFSe (chave de acesso de 50 dígitos) é obrigatória para cancelar no Padrão Nacional — o cancelamento é um evento e101101 registrado em POST /nfse/{chave}/eventos',
+          }],
+        };
+      }
+      if (!request.certificado?.pfxBase64 || !request.certificado?.password) {
+        return {
+          success: false,
+          status: 'erro',
+          mensagens: [{ codigo: '0', mensagem: 'Certificado digital A1 (pfxBase64 + password) é obrigatório' }],
+        };
+      }
+
       const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
       const endpoints = getAdnEndpoints(ambienteEfetivo);
 
-      // Cancelamento também usa XML → GZip → Base64
-      // Mas por ora envia JSON direto (a ser ajustado quando testarmos)
-      const payload = {
-        chNFSe: request.numero ? String(request.numero) : undefined,
-        codigoCancelamento: request.codigoCancelamento,
-        CNPJ: apenasNumeros(request.prestador.cnpj),
-        IM: request.prestador.inscricaoMunicipal,
-        cMun: request.codigoMunicipio,
-        tpAmb: ambienteEfetivo === 'producao' ? '1' : '2',
-      };
+      const { cMotivo, xMotivo } = montarMotivoCancelamento(request.codigoCancelamento, request.motivo);
 
-      const { status, data } = await httpRequest('POST', endpoints.cancelar, request.certificado, payload);
+      const xmlEvento = buildEventoCancelamentoXml({
+        chaveAcesso: chave,
+        documentoAutor: request.prestador.cnpj,
+        cMotivo,
+        xMotivo,
+        ambiente: ambienteEfetivo,
+      });
+
+      const pedidoRegistroEventoXmlGZipB64 = empacotarEvento(xmlEvento, request.certificado);
+
+      const { status, data } = await httpRequest(
+        'POST',
+        `${endpoints.eventos}/${chave}/eventos`,
+        request.certificado,
+        { pedidoRegistroEventoXmlGZipB64 },
+      );
 
       if (status >= 200 && status < 300) {
+        const eventoXml = tryGunzipBase64(data?.eventoXmlGZipB64);
         return {
           success: true,
           status: 'cancelado',
-          dataEmissao: data?.dhCanc ? String(data.dhCanc) : undefined,
+          protocolo: data?.nProtocolo ? String(data.nProtocolo) : undefined,
+          dataEmissao: data?.dataHoraProcessamento
+            ? String(data.dataHoraProcessamento)
+            : (eventoXml?.match(/<dhProc>([^<]+)<\/dhProc>/)?.[1]),
+          xml: eventoXml || undefined,
+        };
+      }
+
+      if (status === 404) {
+        return {
+          success: false,
+          status: 'rejeitado',
+          mensagens: [{
+            codigo: '404',
+            mensagem: `NFS-e não encontrada na SEFIN Nacional para a chave ${chave} — verifique a chave de acesso e o ambiente (${ambienteEfetivo})`,
+          }],
         };
       }
 
       return {
         success: false,
-        status: 'rejeitado',
+        status: status === 400 || status === 422 ? 'rejeitado' : 'erro',
         mensagens: extrairMensagens(data).length > 0
           ? extrairMensagens(data)
-          : [{ codigo: String(status), mensagem: `SEFIN retornou status ${status} ao cancelar` }],
+          : [{ codigo: String(status), mensagem: `SEFIN retornou status ${status} ao registrar evento de cancelamento` }],
       };
     } catch (error: any) {
       return { success: false, status: 'erro', mensagens: [{ codigo: '0', mensagem: error.message || 'Erro no cancelamento via SEFIN' }] };
     }
   }
 
+  // ──────────────────────────────────────────────────────────
+  // Consulta — contrato SEFIN Nacional:
+  //   GET /nfse/{chaveAcesso}  → NFS-e completa (nfseXmlGZipB64)
+  //   GET /dps/{idDps}         → chave de acesso da NFS-e gerada pelo DPS
+  //                              (recuperação pós-timeout: deriva o Id do
+  //                              DPS dos mesmos dados usados na emissão)
+  // ──────────────────────────────────────────────────────────
   async consultar(request: NfseConsultarNfseRequest): Promise<NfseResponse> {
     try {
       const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
       const endpoints = getAdnEndpoints(ambienteEfetivo);
 
-      const params = new URLSearchParams();
-      params.set('CNPJ', apenasNumeros(request.prestador.cnpj));
-      params.set('IM', request.prestador.inscricaoMunicipal);
-      if (request.numero) params.set('nNFSe', String(request.numero));
-      if (request.dataInicial) params.set('dhEmiIni', request.dataInicial);
-      if (request.dataFinal) params.set('dhEmiFim', request.dataFinal);
-      params.set('tpAmb', ambienteEfetivo === 'producao' ? '1' : '2');
+      const chave = apenasNumeros(request.chaveAcesso || '');
+      const idDpsDireto = String(request.idDps || '').trim();
 
-      const url = `${endpoints.consultar}?${params.toString()}`;
+      let url: string;
+      let alvo: string;
+      if (idDpsDireto) {
+        if (!/^DPS\d{42}$/.test(idDpsDireto)) {
+          return {
+            success: false,
+            status: 'erro',
+            mensagens: [{ codigo: '0', mensagem: `idDps inválido — formato esperado "DPS" + 42 dígitos (recebido: ${idDpsDireto.length} chars)` }],
+          };
+        }
+        url = `${endpoints.consultarDps}/${idDpsDireto}`;
+        alvo = `DPS ${idDpsDireto}`;
+      } else if (chave.length === 50) {
+        url = `${endpoints.consultar}/${chave}`;
+        alvo = `chave ${chave}`;
+      } else if (chave.length > 0) {
+        return {
+          success: false,
+          status: 'erro',
+          mensagens: [{ codigo: '0', mensagem: `chaveAcesso deve ter 50 dígitos (recebido: ${chave.length})` }],
+        };
+      } else {
+        if (!request.numero || !request.codigoMunicipio || !request.prestador?.cnpj) {
+          return {
+            success: false,
+            status: 'erro',
+            mensagens: [{
+              codigo: '0',
+              mensagem: 'Consulta no Padrão Nacional exige chaveAcesso (50 dígitos) OU numero + serie + codigoMunicipio + prestador.cnpj para derivar o Id do DPS',
+            }],
+          };
+        }
+        const idDps = montarIdDps({
+          codigoMunicipio: request.codigoMunicipio,
+          cnpj: request.prestador.cnpj,
+          serie: request.serie || '1',
+          numero: request.numero,
+        });
+        url = `${endpoints.consultarDps}/${idDps}`;
+        alvo = `DPS ${idDps}`;
+      }
+
       const { status, data } = await httpRequest('GET', url, request.certificado);
 
       if (status >= 200 && status < 300) {
-        const nfse = data?.nfse || (Array.isArray(data) ? data[0] : null);
-        const infNFSe = nfse?.infNFSe;
+        // GET /dps/{id} → { chaveAcesso }; GET /nfse/{chave} → { nfseXmlGZipB64, ... }
+        const chaveRetornada = data?.chaveAcesso ? String(data.chaveAcesso) : (chave || undefined);
+        const nfseXml = tryGunzipBase64(data?.nfseXmlGZipB64);
 
         return {
           success: true,
           status: 'autorizado',
-          numeroNfse: infNFSe?.nNFSe ? Number(infNFSe.nNFSe) : undefined,
-          codigoVerificacao: infNFSe?.cNFSe ? String(infNFSe.cNFSe) : undefined,
-          dataEmissao: infNFSe?.dhEmi ? String(infNFSe.dhEmi) : undefined,
+          numeroNfse: nfseXml?.match(/<nNFSe>(\d+)<\/nNFSe>/)?.[1]
+            ? Number(nfseXml.match(/<nNFSe>(\d+)<\/nNFSe>/)![1])
+            : undefined,
+          codigoVerificacao: nfseXml?.match(/<cNFSe>([^<]+)<\/cNFSe>/)?.[1],
+          dataEmissao: nfseXml?.match(/<dhEmi>([^<]+)<\/dhEmi>/)?.[1],
+          protocolo: chaveRetornada,
+          xml: nfseXml || undefined,
+          mensagens: chaveRetornada && !nfseXml
+            ? [{ codigo: '200', mensagem: `DPS processado — NFS-e gerada com chave de acesso ${chaveRetornada}` }]
+            : undefined,
+        };
+      }
+
+      // 404 não é falha de infra: significa "documento não existe" —
+      // na recuperação pós-timeout indica que o DPS NÃO foi processado
+      // e a emissão pode ser reenviada com segurança.
+      if (status === 404) {
+        return {
+          success: false,
+          status: 'rejeitado',
+          mensagens: [{
+            codigo: '404',
+            mensagem: `NFS-e não encontrada na SEFIN Nacional (${alvo}, ambiente ${ambienteEfetivo}) — o documento não existe ou ainda não foi processado`,
+          }],
         };
       }
 
       return {
         success: false,
-        status: 'rejeitado',
+        status: 'erro',
         mensagens: extrairMensagens(data).length > 0
           ? extrairMensagens(data)
-          : [{ codigo: String(status), mensagem: `ADN retornou status ${status} na consulta` }],
+          : [{ codigo: String(status), mensagem: `SEFIN retornou status ${status} na consulta (${alvo})` }],
       };
     } catch (error: any) {
-      return { success: false, status: 'erro', mensagens: [{ codigo: '0', mensagem: error.message || 'Erro na consulta via ADN' }] };
+      return { success: false, status: 'erro', mensagens: [{ codigo: '0', mensagem: error.message || 'Erro na consulta via SEFIN Nacional' }] };
     }
   }
 }

@@ -26,8 +26,7 @@ import type {
   MdfeCancelarRequest,
   CertificateData,
   SefazResponse,
-  TpAmb,
-} from '../types';
+  TpAmb, MdfeIncluirCondutorRequest } from '../types';
 
 // ============================================================
 // Emissão (Recepção Síncrona)
@@ -209,6 +208,59 @@ export async function encerrarMdfe(request: MdfeEncerrarRequest): Promise<SefazR
       status: 'erro',
       codigoStatus: '0',
       motivoStatus: error.message || 'Erro desconhecido no encerramento do MDF-e',
+      erros: [error.message],
+    };
+  }
+}
+
+
+// ============================================================
+// Inclusão de Condutor (evento 110114)
+// ============================================================
+
+/**
+ * Inclui um condutor num MDF-e autorizado (evento 110114). Pode ocorrer
+ * múltiplas vezes por chave — nSeqEvento incrementa a cada inclusão.
+ */
+export async function incluirCondutorMdfe(request: MdfeIncluirCondutorRequest): Promise<SefazResponse> {
+  try {
+    const ambiente = request.ambiente || config.sefazAmbiente;
+    const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
+    const endpoints = getMDFeEndpoints(ambiente);
+
+    // CNPJ do autor sai da chave de acesso (posições 6-19)
+    const cnpj = request.chaveAcesso.substring(6, 20);
+
+    const eventoXml = buildMdfeEventoInclusaoCondutor({
+      chaveAcesso: request.chaveAcesso,
+      cnpj,
+      nomeCondutor: request.condutor.nome,
+      cpfCondutor: request.condutor.cpf.replace(/\D/g, ''),
+      tpAmb,
+      nSeqEvento: request.nSeqEvento,
+    });
+
+    const xmlAssinado = assinarEvento(eventoXml, request.certificado);
+
+    const soapBody = `<mdfeRecepcaoEvento xmlns="http://www.portalfiscal.inf.br/mdfe/wsdl/MDFeRecepcaoEvento">
+  <mdfeDadosMsg>${xmlAssinado}</mdfeDadosMsg>
+</mdfeRecepcaoEvento>`;
+
+    const soapResponse = await enviarSoap(
+      endpoints.recepcaoEvento,
+      'http://www.portalfiscal.inf.br/mdfe/wsdl/MDFeRecepcaoEvento/mdfeRecepcaoEvento',
+      soapBody,
+      request.certificado,
+    );
+
+    const retorno = extrairRetorno(soapResponse);
+    return parseEventoRetorno(retorno, request.chaveAcesso, xmlAssinado);
+  } catch (error: any) {
+    return {
+      success: false,
+      status: 'erro',
+      codigoStatus: '0',
+      motivoStatus: error.message || 'Erro desconhecido na inclusão de condutor do MDF-e',
       erros: [error.message],
     };
   }

@@ -10,8 +10,18 @@ describe('getAdnEndpoints', () => {
       expect(ep.emitir).toContain('/SefinNacional/nfse');
     });
 
-    it('endpoint consultar aponta para adn.nfse.gov.br', () => {
-      expect(ep.consultar).toContain('adn.nfse.gov.br');
+    it('endpoint consultar aponta para sefin.nfse.gov.br (GET /nfse/{chave})', () => {
+      expect(ep.consultar).toContain('sefin.nfse.gov.br');
+      expect(ep.consultar).toContain('/SefinNacional/nfse');
+    });
+
+    it('endpoint consultarDps aponta para sefin.nfse.gov.br (GET /dps/{idDps})', () => {
+      expect(ep.consultarDps).toContain('sefin.nfse.gov.br');
+      expect(ep.consultarDps).toContain('/SefinNacional/dps');
+    });
+
+    it('endpoint eventos aponta para a base /SefinNacional/nfse (POST /{chave}/eventos)', () => {
+      expect(ep.eventos).toBe('https://sefin.nfse.gov.br/SefinNacional/nfse');
     });
 
     it('todos endpoints usam HTTPS', () => {

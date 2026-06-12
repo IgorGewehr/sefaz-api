@@ -2,7 +2,7 @@
 // NFe/NFCe Service - Orquestração de emissão fiscal
 // ============================================================
 
-import { buildNFeXml, buildNFCeXml, buildNFCeSupl } from '../lib/nfe/xml-builder';
+import { buildNFeXml, buildNFCeXml, buildNFCeSupl, buildNFCeSuplContingencia } from '../lib/nfe/xml-builder';
 import { assinarXml, assinarEvento, assinarInutilizacao } from '../lib/sefaz/xml-signer';
 import { enviarSoap, extrairRetorno } from '../lib/sefaz/soap-client';
 import { getNFeEndpoints, getNFCeEndpoints } from '../lib/sefaz/endpoints';
@@ -950,10 +950,11 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
 
 /**
  * Prepara NFC-e em contingência off-line (tpEmis=9). Gera chave própria,
- * monta XML com dhCont+xJust, assina — mas NÃO transmite pra SEFAZ. O
- * emissor armazena o XML assinado + chave e imprime DANFCE com aviso "EM
- * CONTINGÊNCIA". A transmissão acontece via transmitirNFCeContingencia
- * quando a SEFAZ volta (até 24h após dhCont).
+ * monta XML com dhCont+xJust, assina, insere infNFeSupl com QR Code no
+ * formato off-line — mas NÃO transmite pra SEFAZ. O emissor armazena o XML
+ * assinado + chave e imprime DANFCE com aviso "EM CONTINGÊNCIA". A
+ * transmissão acontece via transmitirNFCeContingencia quando a SEFAZ volta
+ * (até 24h após dhCont).
  *
  * Pré-condição: request.contingencia tem que estar preenchido com
  * { dhCont, xJust }. xJust precisa ter 15-256 caracteres.
@@ -997,10 +998,32 @@ export async function prepararNFCeContingencia(
     // Monta XML com tpEmis=9 + dhCont + xJust (vem de request.contingencia).
     const nfceXml = buildNFCeXml(request, chaveAcesso, numero, tpAmb);
 
-    // Assina. Em contingência off-line NÃO inserimos infNFeSupl (QR Code SEFAZ) —
-    // só seria inserido se quiséssemos QR de consulta, mas o DANFCE em contingência
-    // não exige (a SEFAZ ainda não autorizou). O QR padrão só é válido após autorização.
-    const signedXml = assinarXml(nfceXml, request.certificado, 'infNFe');
+    // Assina e DEPOIS insere infNFeSupl. O QR Code é OBRIGATÓRIO inclusive em
+    // contingência off-line: infNFeSupl é grupo obrigatório do modelo 65 e a
+    // transmissão posterior seria rejeitada por schema sem ele. Na emissão
+    // off-line o QR v3 (NT 2025.001) assina os parâmetros
+    // (chNFe|3|tpAmb|dia|vNF|tpIdDest|cDest) com a chave privada do
+    // certificado do emitente — CSC e DigestValue saíram do leiaute v3.
+    const signedSemSupl = assinarXml(nfceXml, request.certificado, 'infNFe');
+
+    const dhEmiMatch = signedSemSupl.match(/<dhEmi>([^<]+)<\/dhEmi>/);
+    const vNFMatch = signedSemSupl.match(/<vNF>([^<]+)<\/vNF>/);
+    if (!dhEmiMatch || !vNFMatch) {
+      throw new Error('dhEmi/vNF não encontrados no XML — impossível gerar QR Code de contingência');
+    }
+
+    const nfceSupl = buildNFCeSuplContingencia({
+      chaveAcesso,
+      tpAmb,
+      uf: request.ufEmitente,
+      dhEmi: dhEmiMatch[1],
+      vNF: vNFMatch[1],
+      certificado: request.certificado,
+      consumidor: request.consumidor,
+    });
+
+    // Entre </infNFe> e <Signature>, conforme XSD (mesma técnica do emitirNFCe).
+    const signedXml = signedSemSupl.replace('<Signature', `${nfceSupl}<Signature`);
 
     return {
       success: true,

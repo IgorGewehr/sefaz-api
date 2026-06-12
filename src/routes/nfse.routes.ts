@@ -242,8 +242,14 @@ router.post('/consultar', async (req: Request, res: Response) => {
   try {
     const data: NfseConsultarNfseRequest = req.body;
 
-    if (!data.prestador?.cnpj || !data.prestador?.inscricaoMunicipal) {
-      res.status(400).json({ error: 'Campos obrigatórios: prestador.cnpj, prestador.inscricaoMunicipal' });
+    // Consulta por chave de acesso (50 díg) ou idDps dispensa prestador —
+    // o GET no SEFIN é direto pela chave/Id. Prestador só é necessário pra
+    // DERIVAR o Id do DPS (numero+serie+municipio+cnpj) ou nos providers
+    // municipais (que exigem o filtro).
+    const temChave = String(data.chaveAcesso || '').replace(/\D/g, '').length === 50;
+    const temIdDps = !!data.idDps;
+    if (!temChave && !temIdDps && (!data.prestador?.cnpj || !data.prestador?.inscricaoMunicipal)) {
+      res.status(400).json({ error: 'Campos obrigatórios: prestador.cnpj, prestador.inscricaoMunicipal (ou chaveAcesso de 50 dígitos / idDps)' });
       return;
     }
     if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
@@ -255,6 +261,34 @@ router.post('/consultar', async (req: Request, res: Response) => {
     res.json(result);
   } catch (err: any) {
     console.error('[NFS-e] Erro ao consultar:', err.message);
+    res.status(500).json({ error: 'Erro interno ao processar a requisição' });
+  }
+});
+
+// POST /nfse/consultar-dps - Consulta DPS pelo Id (recuperação pós-timeout).
+// Contrato do saas-erp: { idDPS, certificado, ambiente }.
+router.post('/consultar-dps', async (req: Request, res: Response) => {
+  try {
+    const body = req.body as { idDPS?: string; idDps?: string; certificado?: CertificateData; ambiente?: 'producao' | 'homologacao' };
+    const idDps = String(body.idDPS || body.idDps || '').trim();
+
+    if (!idDps) {
+      res.status(400).json({ error: 'idDPS é obrigatório ("DPS" + 42 dígitos)' });
+      return;
+    }
+    if (!body.certificado?.pfxBase64 || !body.certificado?.password) {
+      res.status(400).json({ error: 'Certificado digital é obrigatório' });
+      return;
+    }
+
+    const result = await nfseService.consultarNfse({
+      idDps,
+      certificado: body.certificado,
+      ambiente: body.ambiente,
+    } as NfseConsultarNfseRequest);
+    res.json(result);
+  } catch (err: any) {
+    console.error('[NFS-e] Erro ao consultar DPS:', err.message);
     res.status(500).json({ error: 'Erro interno ao processar a requisição' });
   }
 });

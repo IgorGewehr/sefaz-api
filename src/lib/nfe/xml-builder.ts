@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { create } from 'xmlbuilder2';
 import { config } from '../../config';
 import type {
+  CertificateData,
   NFeRequest,
   NFCeRequest,
   NFeItem,
@@ -23,6 +24,7 @@ import {
   formatarDataSefaz,
   formatarValor,
   apenasNumeros,
+  parsePfx,
 } from '../utils';
 
 // ============================================================
@@ -1111,4 +1113,96 @@ export function buildNFCeSupl(
   });
 
   return `<infNFeSupl><qrCode>${qrCode.qrCodeUrl}</qrCode><urlChave>${qrCode.urlChave}</urlChave></infNFeSupl>`;
+}
+
+/**
+ * Gera o fragmento infNFeSupl para NFC-e em contingência OFF-LINE (tpEmis=9).
+ *
+ * O QR Code é OBRIGATÓRIO também em contingência — infNFeSupl é grupo
+ * obrigatório do modelo 65 e a transmissão posterior é rejeitada por schema
+ * sem ele. Usa QR Code versão 3 (NT 2025.001 — obrigatório em produção desde
+ * 01/09/2025, inclusive para contingência). Leiaute off-line:
+ *
+ *   url?p=chNFe|3|tpAmb|diaDhEmi|vNF|tpIdDest|cDest|assinatura
+ *
+ * - diaDhEmi: dia (DD) extraído literalmente do dhEmi do XML (sem conversão
+ *   de fuso — o dhEmi já carrega o offset do emitente)
+ * - vNF: 2 casas decimais, ponto decimal, sem separador de milhar
+ * - tpIdDest|cDest: 1=CNPJ, 2=CPF (3=idEstrangeiro não se aplica a esta
+ *   NFC-e); AMBOS VAZIOS quando o consumidor não é identificado — os pipes
+ *   permanecem (campos vazios), espelhando o grupo dest do XML
+ * - assinatura: RSA-SHA1 sobre a string "chNFe|3|tpAmb|dia|vNF|tpIdDest|cDest"
+ *   (exatamente os 7 campos antes dela, sem a URL) com a CHAVE PRIVADA do
+ *   certificado do emitente, codificada em base64 padrão, SEM url-encode
+ *
+ * CSC, idCSC, hash SHA-1 e digVal SAÍRAM do leiaute v3 — a autenticidade é
+ * garantida pela assinatura digital dos parâmetros.
+ *
+ * Referências cruzadas (código verbatim conferido em 2026-06):
+ * - sped-nfe QRCode::get300 (ramo tpEmis==9):
+ *     base64_encode($certificate->sign("$chNFe|3|$tpAmb|$dia|$valor|$tp_idDest|$cDest"))
+ *   com Certificate::sign($content, $algorithm = OPENSSL_ALGO_SHA1).
+ * - ACBr TACBrNFe.GetURLQRCodeV3 (ramo tpEmis=9):
+ *     sEntrada := sEntrada + '|' + SSL.CalcHash(sEntrada, dgstSHA1, outBase64, True)
+ *   (CalcHash com Assina=True = assinatura RSA do digest SHA-1, saída base64).
+ * Divergência entre as referências: para idEstrangeiro (tpIdDest=3) o
+ * sped-nfe esvazia cDest e o ACBr mantém o idEstrangeiro — irrelevante aqui
+ * porque o consumidor da NFC-e só tem CPF/CNPJ.
+ */
+export function buildNFCeSuplContingencia(params: {
+  chaveAcesso: string;
+  tpAmb: '1' | '2';
+  uf: string;
+  /** dhEmi exatamente como está no XML (YYYY-MM-DDThh:mm:ssTZD). */
+  dhEmi: string;
+  /** vNF exatamente como está no ICMSTot do XML. */
+  vNF: string;
+  /** Certificado do emitente — a chave privada assina os parâmetros do QR. */
+  certificado: CertificateData;
+  /** Consumidor identificado (CPF/CNPJ), se houver — mesmo critério do dest do XML. */
+  consumidor?: { cpf?: string; cnpj?: string };
+}): string {
+  const { chaveAcesso, tpAmb, uf, dhEmi, vNF, certificado, consumidor } = params;
+
+  const urlQRCode = NFCE_QRCODE_URL[uf.toUpperCase()]?.[tpAmb];
+  if (!urlQRCode) {
+    throw new Error(`URL de QR Code não encontrada para UF: ${uf}, ambiente: ${tpAmb}`);
+  }
+
+  const diaMatch = dhEmi.match(/^\d{4}-\d{2}-(\d{2})T/);
+  if (!diaMatch) {
+    throw new Error(`dhEmi inválido para QR Code de contingência: ${dhEmi}`);
+  }
+  const dia = diaMatch[1];
+
+  const valorNum = Number(vNF);
+  if (!Number.isFinite(valorNum)) {
+    throw new Error(`vNF inválido para QR Code de contingência: ${vNF}`);
+  }
+  const valor = valorNum.toFixed(2);
+
+  // Mesma precedência de buildNFCeXml (CNPJ antes de CPF) pra manter o QR
+  // coerente com o grupo dest do XML — a SEFAZ cruza os dois na recepção.
+  let tpIdDest = '';
+  let cDest = '';
+  const cnpjDest = consumidor?.cnpj ? apenasNumeros(consumidor.cnpj) : '';
+  const cpfDest = consumidor?.cpf ? apenasNumeros(consumidor.cpf) : '';
+  if (cnpjDest) {
+    tpIdDest = '1';
+    cDest = cnpjDest;
+  } else if (cpfDest) {
+    tpIdDest = '2';
+    cDest = cpfDest;
+  }
+
+  const seq = `${chaveAcesso}|3|${tpAmb}|${dia}|${valor}|${tpIdDest}|${cDest}`;
+
+  const { privateKey } = parsePfx(certificado.pfxBase64, certificado.password);
+  const assinatura = crypto.createSign('RSA-SHA1').update(seq, 'utf8').sign(privateKey, 'base64');
+
+  const qrCodeUrl = `${urlQRCode}?p=${seq}|${assinatura}`;
+
+  const urlChave = NFCE_CONSULTA_URL[uf.toUpperCase()]?.[tpAmb] || urlQRCode;
+
+  return `<infNFeSupl><qrCode>${qrCodeUrl}</qrCode><urlChave>${urlChave}</urlChave></infNFeSupl>`;
 }

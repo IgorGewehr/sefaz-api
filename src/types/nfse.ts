@@ -217,8 +217,19 @@ export interface NfseConsultarLoteRequest {
 
 export interface NfseConsultarNfseRequest {
   prestador: Pick<NfsePrestador, 'cnpj' | 'inscricaoMunicipal'>;
+  /** Id do DPS (45 chars, "DPS"+42 dígitos) — consulta direta GET /dps/{id},
+   *  usada na recuperação pós-timeout quando o caller já tem o Id. */
+  idDps?: string;
+  /** Chave de acesso da NFS-e (50 dígitos — Padrão Nacional). Consulta direta GET /nfse/{chave}. */
+  chaveAcesso?: string;
   /** Número da NFS-e */
   numero?: number;
+  /**
+   * Série do DPS — usada (com `numero` + `codigoMunicipio` + CNPJ do prestador)
+   * para derivar o Id do DPS e recuperar a NFS-e via GET /dps/{idDps}
+   * quando a chave de acesso não é conhecida (ex: timeout na emissão).
+   */
+  serie?: string;
   /** Protocolo de processamento (Betha Cloud) */
   protocolo?: string;
   /** Código IBGE do município (Betha Cloud) */
