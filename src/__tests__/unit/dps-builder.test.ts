@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { XMLParser } from 'fast-xml-parser';
-import { buildDpsXml } from '../../lib/nfse/nacional.provider';
+import { buildDpsXml, NacionalProvider } from '../../lib/nfse/nacional.provider';
 import type { NfseEmitirRequest } from '../../types/nfse';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -261,6 +261,15 @@ describe('buildDpsXml — Regime Normal', () => {
     expect(xml).toContain('<pAliq>');
   });
 
+  it('pAliq tem EXATAMENTE 2 casas decimais (TSDec1V2 do XSD 1.00)', () => {
+    // tiposSimples_v1.00.xsd (pedrocasado/nfse-php, xsd/1.00): pattern
+    // "0|[0-9]{1}(\.[0-9]{2})?" — "5.0000" (4 casas) viola o schema.
+    const xml = buildDpsXml(makeNormal()); // aliquotaIss 0.05 → 5%
+    expect(xml).toContain('<pAliq>5.00</pAliq>');
+    const valor = xml.match(/<pAliq>([^<]+)<\/pAliq>/)![1];
+    expect(valor).toMatch(/^(0|[0-9](\.[0-9]{2})?)$/);
+  });
+
   it('totTrib usa SÓ <indTotTrib> no regime normal (choice do XSD)', () => {
     // vTotTrib simples + indTotTrib juntos violava o schema; vTotTrib é o
     // total aproximado de tributos (Lei 12.741), não o ISS.
@@ -408,5 +417,24 @@ describe('buildDpsXml — ambiente', () => {
   it('tpAmb=2 em homologação (default do ambiente de teste)', () => {
     const xml = buildDpsXml(makeRequest());
     expect(xml).toContain('<tpAmb>2</tpAmb>');
+  });
+});
+
+describe('NacionalProvider.emitir — guard de alíquota percentual', () => {
+  it('aliquotaIss > 1 (percentual por engano) falha na validação, antes de qualquer rede', async () => {
+    const req = makeRequest();
+    req.valores.aliquotaIss = 5; // usuário quis dizer 5% → deveria ser 0.05
+
+    const result = await new NacionalProvider().emitir(req);
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe('erro');
+    expect(result.mensagens?.some(m => /decimal \(0\.05 = 5%\)/.test(m.mensagem))).toBe(true);
+  });
+
+  it('aliquotaIss decimal válida (0.05) passa pelo guard', () => {
+    // buildDpsXml puro — se chegasse no guard com 0.05 não haveria erro
+    const xml = buildDpsXml(makeRequest());
+    expect(xml).toBeTruthy();
   });
 });

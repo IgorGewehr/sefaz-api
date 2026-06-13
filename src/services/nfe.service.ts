@@ -300,7 +300,9 @@ function interpretarStatus(cStat: string): SefazResponse['status'] {
   if (code === 135 || code === 136) return 'autorizado';
 
   // 101 = Cancelamento homologado
-  if (code === 101) return 'autorizado';
+  // 155 = Cancelamento homologado fora de prazo — SUCESSO com ressalva
+  //       (o evento FOI registrado; o xMotivo carrega a ressalva)
+  if (code === 101 || code === 155) return 'autorizado';
 
   // 102 = Inutilização homologada
   if (code === 102) return 'autorizado';
@@ -1321,6 +1323,21 @@ export async function cartaCorrecao(request: NFeCartaCorrecaoRequest): Promise<S
 }
 
 /**
+ * Normaliza o ano da inutilização para 2 dígitos (formato do leiaute:
+ * <ano> e Id usam AA). Aceita "26" ou "2026"; qualquer outra coisa é erro
+ * claro — ano errado no Id quebra a validação de 43 dígitos na SEFAZ.
+ * Exportada para testes unitários (pura).
+ */
+export function normalizarAnoInutilizacao(ano: string | number): string {
+  const raw = String(ano).trim();
+  const normalizado = /^\d{4}$/.test(raw) ? raw.slice(2) : raw;
+  if (!/^\d{2}$/.test(normalizado)) {
+    throw new Error(`Ano inválido para inutilização: "${ano}". Use 2 dígitos ("26") ou 4 dígitos ("2026").`);
+  }
+  return normalizado;
+}
+
+/**
  * Inutiliza uma faixa de numeração de NFe/NFCe
  */
 export async function inutilizar(request: NFeInutilizarRequest): Promise<SefazResponse> {
@@ -1337,9 +1354,10 @@ export async function inutilizar(request: NFeInutilizarRequest): Promise<SefazRe
     const serie = request.serie.padStart(3, '0');
     const nNFIni = String(request.numeroInicial).padStart(9, '0');
     const nNFFin = String(request.numeroFinal).padStart(9, '0');
+    const ano = normalizarAnoInutilizacao(request.ano);
 
     // ID: ID + cUF(2) + ano(2) + CNPJ(14) + mod(2) + serie(3) + nNFIni(9) + nNFFin(9) = 43 dígitos
-    const idInut = `ID${cUF}${request.ano}${cnpj}${request.modelo}${serie}${nNFIni}${nNFFin}`;
+    const idInut = `ID${cUF}${ano}${cnpj}${request.modelo}${serie}${nNFIni}${nNFFin}`;
 
     const inutXml =
       `<inutNFe xmlns="${SEFAZ_NS}" versao="4.00">` +
@@ -1347,7 +1365,7 @@ export async function inutilizar(request: NFeInutilizarRequest): Promise<SefazRe
       `<tpAmb>${tpAmb}</tpAmb>` +
       `<xServ>INUTILIZAR</xServ>` +
       `<cUF>${cUF}</cUF>` +
-      `<ano>${request.ano}</ano>` +
+      `<ano>${ano}</ano>` +
       `<CNPJ>${cnpj}</CNPJ>` +
       `<mod>${request.modelo}</mod>` +
       `<serie>${request.serie}</serie>` +
@@ -1466,9 +1484,10 @@ export async function statusServico(request: StatusServicoRequest): Promise<Sefa
 // ============================================================
 
 /**
- * Parseia o retorno de um evento (cancelamento, CCe)
+ * Parseia o retorno de um evento (cancelamento, CCe).
+ * Exportada para testes unitários (pura, sem I/O).
  */
-function parseRetEvento(retorno: any, chaveAcesso: string): SefazResponse {
+export function parseRetEvento(retorno: any, chaveAcesso: string): SefazResponse {
   const ret = retorno['retEnvEvento'] || retorno;
 
   const cStatLote = String(ret['cStat'] || '');
@@ -1481,7 +1500,9 @@ function parseRetEvento(retorno: any, chaveAcesso: string): SefazResponse {
     const xMotivo = String(infEvento['xMotivo'] || '');
 
     return {
-      success: cStat === '135' || cStat === '136' || cStat === '101',
+      // 155 = cancelamento homologado FORA DE PRAZO: o evento foi registrado
+      // (sucesso); a ressalva fica preservada em motivoStatus/codigoStatus.
+      success: cStat === '135' || cStat === '136' || cStat === '101' || cStat === '155',
       status: interpretarStatus(cStat),
       codigoStatus: cStat,
       motivoStatus: xMotivo,

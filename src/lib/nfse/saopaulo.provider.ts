@@ -126,14 +126,30 @@ function signRpsHash(hashString: string, certificado: CertificateData): string {
 
 /**
  * Resolve código de tributação SP a partir dos campos do request.
+ *
+ * Domínio TipoTributacao da Nota Paulistana (conferido em 2026-06 no ACBr,
+ * frones/ACBr master, ACBrNFSeXProviderBase.pas → TipoTributacaoRPSToStr):
+ *   T/F = tributado em SP / fora; A/B = isento em SP / fora;
+ *   M/N = imune em SP / fora; X/V = exigibilidade suspensa em SP / fora;
+ *   P = exportação de serviços.
+ * NÃO existe código para "não incidência" (exigibilidadeIss=2) — mapear
+ * para 'T' (tributado) cobraria ISS de operação fora do campo de incidência,
+ * então rejeitamos com erro claro.
+ *
+ * Exportada para testes unitários (pura).
  */
-function resolveTributacao(request: NfseEmitirRequest): string {
+export function resolveTributacao(request: NfseEmitirRequest): string {
   const codMun = request.servico.codigoMunicipioPrestacao || '';
   const isInSP = codMun === '3550308';
 
   switch (request.valores.exigibilidadeIss) {
     case '1': return isInSP ? 'T' : 'F';   // Exigível
-    case '2': return isInSP ? 'T' : 'F';   // Não incidência
+    case '2':
+      throw new Error(
+        'exigibilidadeIss=2 (não incidência) não tem código equivalente no domínio ' +
+        'TipoTributacao da Nota Paulistana (T/F/A/B/M/N/X/V/P). ' +
+        'Use 3 (isenção), 5 (imunidade) ou revise a exigibilidade do serviço.',
+      );
     case '3': return isInSP ? 'A' : 'B';   // Isenção
     case '4': return 'P';                    // Exportação
     case '5': return isInSP ? 'M' : 'N';   // Imunidade

@@ -89,15 +89,43 @@ export function gerarCodigoNumerico(): string {
 }
 
 /**
- * Escapa caracteres especiais XML para evitar injection
+ * Escapa caracteres especiais XML para evitar injection.
+ * Remove também control chars proibidos pelo XML 1.0 (Char ::= #x9 | #xA |
+ * #xD | [#x20-...]): mesmo escapados eles tornam o documento malformado.
  */
 export function escapeXml(str: string): string {
   return str
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+/**
+ * Trunca campo texto no limite do schema SEFAZ (trim antes de medir).
+ * Truncar é preferível à rejeição 215/225 por estourar o maxLength do XSD.
+ */
+export function truncar(valor: string, max: number): string {
+  // Sanitiza ANTES de truncar: o xmlbuilder2 escapa &<>"' ao serializar mas
+  // NÃO remove caracteres de controle inválidos em XML 1.0 nem surrogates
+  // solitários — ambos quebram o XML na SEFAZ. Não escapamos &<> aqui (o
+  // xmlbuilder2 faz isso; escapar duas vezes geraria &amp;amp;).
+  const v = (valor ?? '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '') // high surrogate sem par
+    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '') // low surrogate sem par
+    .trim();
+  if (v.length <= max) return v;
+  let cut = v.slice(0, max);
+  // Não cortar no meio de um par surrogate (geraria caractere inválido).
+  const lastCode = cut.charCodeAt(cut.length - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) cut = cut.slice(0, -1);
+  console.warn(`[utils] Campo truncado de ${v.length} para ${cut.length} chars: "${v.slice(0, 30)}..."`);
+  return cut;
 }
 
 /**
@@ -196,27 +224,58 @@ export function parsePfx(pfxBase64: string, password: string): {
   const pkcs12Asn1 = forge.asn1.fromDer(pfxDer);
   const pkcs12 = forge.pkcs12.pkcs12FromAsn1(pkcs12Asn1, password);
 
-  // Extrair chave privada
-  const keyBags = pkcs12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
-  const keyBag = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag];
+  // Extrair chave privada: pkcs8ShroudedKeyBag (padrão, criptografada) OU
+  // keyBag (sem criptografia — alguns geradores exportam assim).
+  const shroudedBags = pkcs12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
+  let keyBag = shroudedBags[forge.pki.oids.pkcs8ShroudedKeyBag];
+  if (!keyBag || keyBag.length === 0 || !keyBag[0].key) {
+    const plainBags = pkcs12.getBags({ bagType: forge.pki.oids.keyBag });
+    keyBag = plainBags[forge.pki.oids.keyBag];
+  }
   if (!keyBag || keyBag.length === 0 || !keyBag[0].key) {
     throw new Error('Chave privada não encontrada no certificado');
   }
-  const privateKey = forge.pki.privateKeyToPem(keyBag[0].key);
+  const privateKeyObj = keyBag[0].key;
+  const privateKey = forge.pki.privateKeyToPem(privateKeyObj);
 
   // Extrair certificados
   const certBags = pkcs12.getBags({ bagType: forge.pki.oids.certBag });
-  const certBag = certBags[forge.pki.oids.certBag];
-  if (!certBag || certBag.length === 0 || !certBag[0].cert) {
+  const allCerts = (certBags[forge.pki.oids.certBag] || [])
+    .filter(b => b.cert)
+    .map(b => b.cert!);
+  if (allCerts.length === 0) {
     throw new Error('Certificado não encontrado no arquivo PFX');
   }
 
-  const cert = certBag[0].cert;
+  // O cert-folha do emitente nem sempre é o [0] — PFX gerado por algumas ACs
+  // traz a cadeia (raiz/intermediária) ANTES da folha. Assinar com a CA errada
+  // gera rejeição de assinatura na SEFAZ. Seleção:
+  //  1. cert cuja chave pública casa com a privada (modulus RSA);
+  //  2. fallback: primeiro cert que NÃO é CA (basicConstraints.cA);
+  //  3. fallback final: [0] (comportamento antigo).
+  const privN = (privateKeyObj as forge.pki.rsa.PrivateKey).n;
+  let cert = allCerts.find(c => {
+    try {
+      return (c.publicKey as forge.pki.rsa.PublicKey).n.compareTo(privN) === 0;
+    } catch {
+      return false;
+    }
+  });
+  if (!cert) {
+    cert = allCerts.find(c => {
+      const bc = c.getExtension('basicConstraints') as { cA?: boolean } | null;
+      return !(bc && bc.cA === true);
+    });
+  }
+  if (!cert) {
+    cert = allCerts[0];
+  }
+
   const certificate = forge.pki.certificateToPem(cert);
 
-  const chain = certBag.slice(1)
-    .filter(b => b.cert)
-    .map(b => forge.pki.certificateToPem(b.cert!));
+  const chain = allCerts
+    .filter(c => c !== cert)
+    .map(c => forge.pki.certificateToPem(c));
 
   const subject = cert.subject.getField('CN')?.value || '';
   const cnpj = extrairCnpjDoCert(cert, subject);

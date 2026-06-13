@@ -335,7 +335,10 @@ export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): st
     if (tribISSQN === '3' && request.servico.codigoPaisPrestacao) {
       tribMun.ele(ns, 'cPaisResult').txt(request.servico.codigoPaisPrestacao);
     }
-    tribMun.ele(ns, 'pAliq').txt(formatarValor(v.aliquotaIss * 100, 4));
+    // pAliq é TSDec1V2 no XSD 1.00 (tiposSimples_v1.00.xsd): pattern
+    // "0|[0-9]{1}(\.[0-9]{2})?" — 1 dígito inteiro + EXATAMENTE 2 casas.
+    // 4 casas ("5.0000") viola o schema.
+    tribMun.ele(ns, 'pAliq').txt(formatarValor(v.aliquotaIss * 100, 2));
     // tpRetISSQN (layout nacional): 1=Não Retido, 2=Retido pelo Tomador
     tribMun.ele(ns, 'tpRetISSQN').txt(v.issRetido ? '2' : '1');
   }
@@ -579,6 +582,11 @@ function validarDps(request: NfseEmitirRequest): string[] {
   }
   if (request.valores?.aliquotaIss === undefined || request.valores.aliquotaIss < 0) {
     erros.push('Alíquota ISS é obrigatória');
+  } else if (request.valores.aliquotaIss > 1) {
+    // 5 em vez de 0.05 = percentual passado por engano → pAliq sairia 500.00
+    erros.push(
+      `aliquotaIss deve ser decimal (0.05 = 5%) — valor ${request.valores.aliquotaIss} > 1 indica percentual informado por engano`,
+    );
   }
   if (!request.rps?.numero) erros.push('Número do DPS é obrigatório');
   if (!request.rps?.serie) erros.push('Série do DPS é obrigatória');

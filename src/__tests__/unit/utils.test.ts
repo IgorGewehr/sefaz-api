@@ -7,6 +7,7 @@ import {
   montarChaveAcesso,
   escapeXml,
   gerarIdLote,
+  truncar,
 } from '../../lib/utils';
 
 describe('apenasNumeros', () => {
@@ -130,6 +131,37 @@ describe('escapeXml', () => {
     expect(escapeXml('<tag>')).toBe('&lt;tag&gt;');
     expect(escapeXml('"valor"')).toBe('&quot;valor&quot;');
     expect(escapeXml("it's")).toBe('it&apos;s');
+  });
+
+  it('remove control chars proibidos pelo XML 1.0', () => {
+    expect(escapeXml('A\x00B\x01C\x08D\x0BE\x0CF\x0EG\x1FH')).toBe('ABCDEFGH');
+    // \x1A (SUB) aparece com frequência em texto colado de Windows
+    expect(escapeXml('justificativa\x1Ade cancelamento')).toBe('justificativade cancelamento');
+  });
+
+  it('preserva TAB, LF e CR (válidos em XML 1.0)', () => {
+    expect(escapeXml('a\tb\nc\rd')).toBe('a\tb\nc\rd');
+  });
+
+  it('escapa entidades depois de remover control chars', () => {
+    expect(escapeXml('\x00<x>&\x1F')).toBe('&lt;x&gt;&amp;');
+  });
+});
+
+describe('truncar', () => {
+  it('mantém string dentro do limite (após trim)', () => {
+    expect(truncar('abc', 5)).toBe('abc');
+    expect(truncar('  abcde  ', 5)).toBe('abcde'); // trim antes de medir
+  });
+
+  it('trunca no limite quando estoura', () => {
+    expect(truncar('a'.repeat(70), 60)).toBe('a'.repeat(60));
+    expect(truncar('a'.repeat(70), 60)).toHaveLength(60);
+  });
+
+  it('lida com vazio e undefined sem lançar', () => {
+    expect(truncar('', 10)).toBe('');
+    expect(truncar(undefined as unknown as string, 10)).toBe('');
   });
 });
 

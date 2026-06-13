@@ -25,6 +25,7 @@ import {
   formatarValor,
   apenasNumeros,
   parsePfx,
+  truncar,
 } from '../utils';
 
 // ============================================================
@@ -61,10 +62,40 @@ const NFCE_QRCODE_URL: Record<string, Record<'1' | '2', string>> = {
   TO: { '1': 'https://www.sefaz.to.gov.br/nfce/qrcode', '2': 'https://www.sefaz.to.gov.br/nfce/qrcode' },
 };
 
+// urlChave (consulta por chave de acesso, impresso no DANFCE) por UF.
+// Fonte: nfephp-org/sped-nfe (master) storage/uri_consulta_nfce.json —
+// valores verbatim ('1'=produção, '2'=homologação), conferido em 2026-06.
+// As 27 UFs têm entrada na fonte; o fallback `|| urlQRCode` (em
+// gerarQRCodeNFCe e buildNFCeSuplContingencia) fica só como rede de
+// segurança para UF fora da tabela.
 const NFCE_CONSULTA_URL: Record<string, Record<'1' | '2', string>> = {
-  AC: { '1': 'http://www.sefaznet.ac.gov.br/nfce/consulta', '2': 'http://hml.sefaznet.ac.gov.br/nfce/consulta' },
+  AC: { '1': 'www.sefaznet.ac.gov.br/nfce/consulta', '2': 'www.sefaznet.ac.gov.br/nfce/consulta' },
+  AL: { '1': 'www.sefaz.al.gov.br/nfce/consulta', '2': 'www.sefaz.al.gov.br/nfce/consulta' },
+  AM: { '1': 'www.sefaz.am.gov.br/nfce/consulta', '2': 'www.sefaz.am.gov.br/nfce/consulta' },
+  AP: { '1': 'www.sefaz.ap.gov.br/nfce/consulta', '2': 'www.sefaz.ap.gov.br/nfce/consulta' },
+  BA: { '1': 'http://www.sefaz.ba.gov.br/nfce/consulta', '2': 'http://hinternet.sefaz.ba.gov.br/nfce/consulta' },
+  CE: { '1': 'www.sefaz.ce.gov.br/nfce/consulta', '2': 'www.sefaz.ce.gov.br/nfce/consulta' },
+  DF: { '1': 'www.fazenda.df.gov.br/nfce/consulta', '2': 'www.fazenda.df.gov.br/nfce/consulta' },
+  ES: { '1': 'www.sefaz.es.gov.br/nfce/consulta', '2': 'www.sefaz.es.gov.br/nfce/consulta' },
+  GO: { '1': 'www.sefaz.go.gov.br/nfce/consulta', '2': 'www.nfce.go.gov.br/post/ver/214413/consulta-nfc-e-homologacao' },
+  MA: { '1': 'www.sefaz.ma.gov.br/nfce/consulta', '2': 'www.sefaz.ma.gov.br/nfce/consulta' },
+  MG: { '1': 'https://portalsped.fazenda.mg.gov.br/portalnfce', '2': 'https://hportalsped.fazenda.mg.gov.br/portalnfce' },
+  MS: { '1': 'http://www.dfe.ms.gov.br/nfce/consulta', '2': 'http://www.dfe.ms.gov.br/nfce/consulta' },
+  MT: { '1': 'http://www.sefaz.mt.gov.br/nfce/consultanfce', '2': 'http://homologacao.sefaz.mt.gov.br/nfce/consultanfce' },
+  PA: { '1': 'www.sefa.pa.gov.br/nfce/consulta', '2': 'www.sefa.pa.gov.br/nfce/consulta' },
+  PB: { '1': 'www.sefaz.pb.gov.br/nfce/consulta', '2': 'www.sefaz.pb.gov.br/nfcehom' },
+  PE: { '1': 'nfce.sefaz.pe.gov.br/nfce/consulta', '2': 'nfce.sefaz.pe.gov.br/nfce/consulta' },
+  PI: { '1': 'www.sefaz.pi.gov.br/nfce/consulta', '2': 'www.sefaz.pi.gov.br/nfce/consulta' },
+  PR: { '1': 'http://www.fazenda.pr.gov.br/nfce/consulta', '2': 'http://www.fazenda.pr.gov.br/nfce/consulta' },
+  RJ: { '1': 'www.fazenda.rj.gov.br/nfce/consulta', '2': 'www.fazenda.rj.gov.br/nfce/consulta' },
+  RN: { '1': 'www.set.rn.gov.br/nfce/consulta', '2': 'www.set.rn.gov.br/nfce/consulta' },
+  RO: { '1': 'www.sefin.ro.gov.br/nfce/consulta', '2': 'www.sefin.ro.gov.br/nfce/consulta' },
+  RR: { '1': 'www.sefaz.rr.gov.br/nfce/consulta', '2': 'www.sefaz.rr.gov.br/nfce/consulta' },
+  RS: { '1': 'www.sefaz.rs.gov.br/nfce/consulta', '2': 'www.sefaz.rs.gov.br/nfce/consulta' },
+  SC: { '1': 'https://sat.sef.sc.gov.br/nfce/consulta', '2': 'https://hom.sat.sef.sc.gov.br/nfce/consulta' },
+  SE: { '1': 'http://www.nfce.se.gov.br/nfce/consulta', '2': 'http://www.hom.nfe.se.gov.br/nfce/consulta' },
   SP: { '1': 'https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica', '2': 'https://www.homologacao.nfce.fazenda.sp.gov.br/NFCeConsultaPublica' },
-  RS: { '1': 'https://www.sefaz.rs.gov.br/NFCE/NFCE-COM.aspx', '2': 'https://www.sefaz.rs.gov.br/NFCE/NFCE-COM.aspx' },
+  TO: { '1': 'www.sefaz.to.gov.br/nfce/consulta', '2': 'http://homologacao.sefaz.to.gov.br/nfce/consulta.jsf' },
 };
 
 // ============================================================
@@ -483,13 +514,13 @@ function calcularTotais(itens: NFeItem[]): Record<string, string> {
  */
 function buildEnderecoGroup(endereco: Endereco, tag: string): Record<string, any> {
   const end: Record<string, any> = {
-    xLgr: endereco.logradouro,
-    nro: endereco.numero,
+    xLgr: truncar(endereco.logradouro, 60),
+    nro: truncar(endereco.numero, 60),
   };
-  if (endereco.complemento) end['xCpl'] = endereco.complemento;
-  end['xBairro'] = endereco.bairro;
+  if (endereco.complemento) end['xCpl'] = truncar(endereco.complemento, 60);
+  end['xBairro'] = truncar(endereco.bairro, 60);
   end['cMun'] = endereco.codigoMunicipio;
-  end['xMun'] = endereco.municipio;
+  end['xMun'] = truncar(endereco.municipio, 60);
   end['UF'] = endereco.uf;
   end['CEP'] = apenasNumeros(endereco.cep);
   end['cPais'] = endereco.codigoPais || '1058';
@@ -533,7 +564,7 @@ function buildIdeGroup(params: {
   const ide: Record<string, any> = {
     cUF: params.cUF,
     cNF: params.cNF,
-    natOp: params.natOp,
+    natOp: truncar(params.natOp, 60),
     mod: params.mod,
     serie: params.serie,
     nNF: String(params.nNF),
@@ -586,11 +617,11 @@ function buildIdeGroup(params: {
 function buildEmitenteGroup(emitente: NFeEmitente): Record<string, any> {
   const emit: Record<string, any> = {
     CNPJ: apenasNumeros(emitente.cnpj),
-    xNome: emitente.nome,
+    xNome: truncar(emitente.nome, 60),
   };
 
   if (emitente.nomeFantasia) {
-    emit['xFant'] = emitente.nomeFantasia;
+    emit['xFant'] = truncar(emitente.nomeFantasia, 60);
   }
 
   Object.assign(emit, buildEnderecoGroup(emitente.endereco, 'enderEmit'));
@@ -624,7 +655,7 @@ function buildDestinatarioGroup(dest: NFeDestinatario, tpAmb: '1' | '2'): Record
   }
 
   // Em homologacao SEFAZ exige nome fixo
-  destGroup['xNome'] = tpAmb === '2' ? 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL' : dest.nome;
+  destGroup['xNome'] = tpAmb === '2' ? 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL' : truncar(dest.nome, 60);
 
   if (dest.endereco) {
     Object.assign(destGroup, buildEnderecoGroup(dest.endereco, 'enderDest'));
@@ -648,10 +679,21 @@ function buildDestinatarioGroup(dest: NFeDestinatario, tpAmb: '1' | '2'): Record
  */
 function buildDetGroups(itens: NFeItem[], crt: string): Array<Record<string, any>> {
   return itens.map((item) => {
+    // cEAN/cEANTrib são OBRIGATÓRIOS no XSD 4.00 (rejeição 225 se omitidos);
+    // sem GTIN o valor literal exigido é 'SEM GTIN'. uTrib/qTrib/vUnTrib
+    // ausentes espelham a unidade comercial (caso comum: sem conversão).
+    const cEAN = (item.produto.cEAN ?? '').trim() || 'SEM GTIN';
+    const cEANTrib = (item.produto.cEANTrib ?? '').trim() || 'SEM GTIN';
+    // unidadeTrib é string — '' não cai no fallback com ?? (como cEAN acima),
+    // então usar || após trim para espelhar uCom quando vier vazia.
+    const uTrib = (item.produto.unidadeTrib ?? '').trim() || item.produto.unidade;
+    const qTrib = item.produto.quantidadeTrib ?? item.produto.quantidade;
+    const vUnTrib = item.produto.valorUnitarioTrib ?? item.produto.valorUnitario;
+
     const prod: Record<string, any> = {
       cProd: item.produto.codigo,
-      cEAN: item.produto.cEAN,
-      xProd: item.produto.descricao,
+      cEAN,
+      xProd: truncar(item.produto.descricao, 120),
       NCM: item.produto.ncm,
     };
 
@@ -664,10 +706,10 @@ function buildDetGroups(itens: NFeItem[], crt: string): Array<Record<string, any
     prod['qCom'] = formatarValor(item.produto.quantidade, 4);
     prod['vUnCom'] = formatarValor(item.produto.valorUnitario, 10);
     prod['vProd'] = formatarValor(item.produto.valorTotal);
-    prod['cEANTrib'] = item.produto.cEANTrib;
-    prod['uTrib'] = item.produto.unidadeTrib;
-    prod['qTrib'] = formatarValor(item.produto.quantidadeTrib, 4);
-    prod['vUnTrib'] = formatarValor(item.produto.valorUnitarioTrib, 10);
+    prod['cEANTrib'] = cEANTrib;
+    prod['uTrib'] = uTrib;
+    prod['qTrib'] = formatarValor(qTrib, 4);
+    prod['vUnTrib'] = formatarValor(vUnTrib, 10);
 
     if (item.produto.valorFrete) {
       prod['vFrete'] = formatarValor(item.produto.valorFrete);
@@ -755,8 +797,13 @@ function buildPagamentoGroup(pag: NFePagamento): Record<string, any> {
   pagGroup['detPag'] = pag.formas.map((forma) => {
     const detPag: Record<string, any> = {
       tPag: forma.tipo,
-      vPag: formatarValor(forma.valor),
     };
+    // xPag é obrigatório quando tPag=99 (Outros) — sem ele a SEFAZ rejeita
+    // por schema. Ordem do XSD: tPag -> xPag -> vPag.
+    if (forma.tipo === '99') {
+      detPag['xPag'] = truncar(forma.descricao || 'Outros', 60);
+    }
+    detPag['vPag'] = formatarValor(forma.valor);
 
     if (forma.cartao) {
       detPag['card'] = {
@@ -804,34 +851,23 @@ function buildCobrancaGroup(cobr: NFeCobranca): Record<string, any> {
 }
 
 /**
- * Gera o QR Code para NFCe
+ * Gera o QR Code v3 (NT 2025.001) para NFCe em emissão ONLINE:
+ * url?p=chNFe|3|tpAmb — sem CSC, sem hash. O leiaute off-line (tpEmis=9,
+ * com assinatura RSA) vive em buildNFCeSuplContingencia.
  */
 function gerarQRCodeNFCe(params: {
   chNFe: string;
-  versaoQRCode: string;
   tpAmb: '1' | '2';
-  csc: { id: string; token: string };
   uf: string;
 }): { qrCodeUrl: string; urlChave: string } {
-  const { chNFe, versaoQRCode, tpAmb, csc, uf } = params;
+  const { chNFe, tpAmb, uf } = params;
 
   const urlQRCode = NFCE_QRCODE_URL[uf.toUpperCase()]?.[tpAmb];
   if (!urlQRCode) {
     throw new Error(`URL de QR Code não encontrada para UF: ${uf}, ambiente: ${tpAmb}`);
   }
 
-  let qrCodeUrl: string;
-
-  if (versaoQRCode === '3') {
-    // QR Code v3 (NT 2025.001) - emissão online: sem CSC, sem hash
-    qrCodeUrl = `${urlQRCode}?p=${chNFe}|${versaoQRCode}|${tpAmb}`;
-  } else {
-    // QR Code v2 - formato legado
-    const cIdToken = csc.id.padStart(6, '0');
-    const concat = `${chNFe}|${versaoQRCode}|${tpAmb}|${cIdToken}${csc.token}`;
-    const hashQRCode = crypto.createHash('sha256').update(concat).digest('hex').toUpperCase();
-    qrCodeUrl = `${urlQRCode}?p=${chNFe}|${versaoQRCode}|${tpAmb}|${cIdToken}|${hashQRCode}`;
-  }
+  const qrCodeUrl = `${urlQRCode}?p=${chNFe}|3|${tpAmb}`;
 
   // URL de consulta por chave
   const consultaUrl = NFCE_CONSULTA_URL[uf.toUpperCase()]?.[tpAmb] || urlQRCode;
@@ -953,7 +989,7 @@ export function buildNFeXml(
       infAdic['infAdFisco'] = request.informacoesAdicionais.fisco;
     }
     if (request.informacoesAdicionais.contribuinte) {
-      infAdic['infCpl'] = request.informacoesAdicionais.contribuinte;
+      infAdic['infCpl'] = truncar(request.informacoesAdicionais.contribuinte, 5000);
     }
     if (Object.keys(infAdic).length > 0) {
       nfeObj.NFe.infNFe['infAdic'] = infAdic;
@@ -1065,7 +1101,7 @@ export function buildNFCeXml(
     if (request.consumidor.nome) {
       dest['xNome'] = tpAmb === '2'
         ? 'NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'
-        : request.consumidor.nome;
+        : truncar(request.consumidor.nome, 60); // xNome max 60 (era cru em produção)
     }
     dest['indIEDest'] = '9'; // Não contribuinte (NFCe)
     nfceObj.NFe.infNFe['dest'] = dest;
@@ -1079,7 +1115,7 @@ export function buildNFCeXml(
   // Informações adicionais
   if (request.informacoesAdicionais?.contribuinte) {
     nfceObj.NFe.infNFe['infAdic'] = {
-      infCpl: request.informacoesAdicionais.contribuinte,
+      infCpl: truncar(request.informacoesAdicionais.contribuinte, 5000),
     };
   }
 
@@ -1101,14 +1137,14 @@ export function buildNFCeXml(
 export function buildNFCeSupl(
   chaveAcesso: string,
   tpAmb: '1' | '2',
-  csc: { id: string; token: string },
+  // CSC mantido na assinatura por compatibilidade de chamada — o QR v3
+  // online (NT 2025.001) não usa mais CSC/hash.
+  _csc: { id: string; token: string },
   uf: string,
 ): string {
   const qrCode = gerarQRCodeNFCe({
     chNFe: chaveAcesso,
-    versaoQRCode: '3',
     tpAmb,
-    csc,
     uf,
   });
 

@@ -147,6 +147,8 @@ export interface NFePagamento {
   indicadorPagamento: '0' | '1'; // 0=À vista, 1=A prazo
   formas: Array<{
     tipo: string; // tPag: 01=Dinheiro, 03=Cartão Crédito, 04=Cartão Débito, 17=PIX, etc.
+    /** xPag: descrição do meio de pagamento. OBRIGATÓRIO quando tPag=99 (Outros). */
+    descricao?: string;
     valor: number;
     cartao?: {
       tipoIntegracao: '1' | '2'; // 1=Integrado, 2=Não integrado
