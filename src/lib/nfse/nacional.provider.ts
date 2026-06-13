@@ -690,10 +690,18 @@ export class NacionalProvider implements INfseProvider {
 
       if (status >= 200 && status < 300) {
         const eventoXml = tryGunzipBase64(data?.eventoXmlGZipB64);
+        // A resposta SEFIN de eventos não traz 'nProtocolo' — o identificador
+        // do evento registrado vem no XML do evento (eventoXmlGZipB64). Tenta
+        // nProt → Id do evento. (Tags exatas a confirmar em produção restrita.)
+        const protocolo =
+          eventoXml?.match(/<nProt>([^<]+)<\/nProt>/)?.[1]
+          ?? eventoXml?.match(/<infEvento[^>]*\bId="([^"]+)"/)?.[1]
+          ?? eventoXml?.match(/<idEvento>([^<]+)<\/idEvento>/)?.[1]
+          ?? undefined;
         return {
           success: true,
           status: 'cancelado',
-          protocolo: data?.nProtocolo ? String(data.nProtocolo) : undefined,
+          protocolo,
           dataEmissao: data?.dataHoraProcessamento
             ? String(data.dataHoraProcessamento)
             : (eventoXml?.match(/<dhProc>([^<]+)<\/dhProc>/)?.[1]),
