@@ -358,6 +358,11 @@ export interface SefazResponse {
   xmlAssinado?: string;
   /** Na consulta de nota cancelada: o procEventoNFe do cancelamento, como a SEFAZ o registrou. */
   xmlCancelamento?: string;
+  /**
+   * O pedido não chegou à SEFAZ (circuito aberto, sem conexão, 503): o documento não existe
+   * lá e o número continua livre. Vem sem chave e sem XML assinado — não há o que consultar.
+   */
+  naoEnviado?: boolean;
   erros?: string[];
   /** Fragmento <protNFe> literal extraído da resposta SOAP da SEFAZ.
    *  Uso interno para montar o nfeProc com o protocolo real (verAplic/digVal);

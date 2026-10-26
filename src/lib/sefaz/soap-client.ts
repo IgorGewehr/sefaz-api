@@ -7,6 +7,30 @@ import type { CertificateData } from '../../types';
 import { logSoapRequest, logSoapResponse, logSoapError } from '../logger/soap-logger';
 import { assertClosed, recordSuccess, recordFailure } from './circuit-breaker';
 
+/**
+ * A SEFAZ não foi alcançada: o pedido **com certeza** não chegou a ela — o circuito estava
+ * aberto, a conexão (ou o aperto de mão TLS) não se completou, ou ela respondeu 503 ou
+ * redirecionou (manutenção). O emissor pode tratar o documento como não enviado — o número
+ * continua livre, e pode ir em contingência com ele. Um timeout ou uma queda **depois** de
+ * conectar não é isto: o pedido pode ter chegado, e só a consulta pela chave diz.
+ */
+export class SefazNaoAlcancadaError extends Error {
+  readonly naoEnviado = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'SefazNaoAlcancadaError';
+  }
+}
+
+/** O erro diz que o pedido não chegou à SEFAZ (ver {@link SefazNaoAlcancadaError}). */
+export function naoChegouASefaz(err: unknown): boolean {
+  return (
+    err instanceof SefazNaoAlcancadaError ||
+    (typeof err === 'object' && err !== null && (err as { naoEnviado?: unknown }).naoEnviado === true)
+  );
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -118,8 +142,9 @@ export async function enviarSoap(
   try {
     assertClosed(url);
   } catch (err: any) {
-    logSoapError(url, soapAction, err, 0);
-    return Promise.reject(err);
+    const error = new SefazNaoAlcancadaError(err.message);
+    logSoapError(url, soapAction, error, 0);
+    return Promise.reject(error);
   }
 
   return new Promise((resolve, reject) => {
@@ -134,7 +159,8 @@ export async function enviarSoap(
 
     const options: https.RequestOptions = {
       hostname: urlObj.hostname,
-      port: 443,
+      // A porta da URL, quando houver (os webservices da SEFAZ usam a 443).
+      port: urlObj.port ? Number(urlObj.port) : 443,
       path: urlObj.pathname + urlObj.search,
       method: 'POST',
       agent,
@@ -149,6 +175,9 @@ export async function enviarSoap(
             'Content-Length': Buffer.byteLength(soapEnvelope, 'utf-8'),
           },
     };
+
+    // Só depois do TLS o corpo sai: falha antes disso é pedido que não chegou à SEFAZ.
+    let conectado = false;
 
     const req = https.request(options, (res) => {
       let data = '';
@@ -170,17 +199,35 @@ export async function enviarSoap(
           } else {
             recordSuccess(url);
           }
-          const error = new Error(`SEFAZ retornou status ${res.statusCode}: ${data.slice(0, 500)}`);
+          const mensagem = `SEFAZ retornou status ${res.statusCode}: ${data.slice(0, 500)}`;
+          // 503 (serviço fora) e redirecionamento (página de manutenção): o webservice não
+          // processou. 500/502/504 podem vir depois de processar — incerto.
+          const naoProcessou =
+            res.statusCode === 503 ||
+            (res.statusCode !== undefined && res.statusCode >= 300 && res.statusCode < 400);
+          const error = naoProcessou ? new SefazNaoAlcancadaError(mensagem) : new Error(mensagem);
           logSoapError(url, soapAction, error, duration);
           reject(error);
         }
       });
     });
 
+    req.on('socket', (socket) => {
+      // Socket reaproveitado (keep-alive) já vem conectado: o pedido pode ter saído.
+      if (!socket.connecting && !socket.destroyed) {
+        conectado = true;
+        return;
+      }
+      socket.once('secureConnect', () => {
+        conectado = true;
+      });
+    });
+
     req.on('error', (err) => {
       const duration = Date.now() - startTime;
       recordFailure(url);
-      const error = new Error(`Erro de conexão com SEFAZ: ${err.message}`);
+      const mensagem = `Erro de conexão com SEFAZ: ${err.message}`;
+      const error = conectado ? new Error(mensagem) : new SefazNaoAlcancadaError(mensagem);
       logSoapError(url, soapAction, error, duration);
       reject(error);
     });
@@ -189,7 +236,9 @@ export async function enviarSoap(
       req.destroy();
       const duration = Date.now() - startTime;
       recordFailure(url);
-      const error = new Error('Timeout na conexão com SEFAZ (60s)');
+      const error = conectado
+        ? new Error('Timeout na conexão com SEFAZ (60s)')
+        : new SefazNaoAlcancadaError('Timeout ao conectar com a SEFAZ (60s) — o pedido não saiu');
       logSoapError(url, soapAction, error, duration);
       reject(error);
     });

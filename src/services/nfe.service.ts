@@ -3,6 +3,7 @@
 // ============================================================
 
 import { buildNFeXml, buildNFCeXml, buildNFCeSupl, buildNFCeSuplContingencia } from '../lib/nfe/xml-builder';
+import { naoChegouASefaz } from '../lib/sefaz/soap-client';
 import { assinarXml, assinarEvento, assinarInutilizacao } from '../lib/sefaz/xml-signer';
 import { enviarSoap, extrairRetorno } from '../lib/sefaz/soap-client';
 import { getNFeEndpoints, getNFCeEndpoints } from '../lib/sefaz/endpoints';
@@ -668,6 +669,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
     completarXmls(resultado, signedXml, tpAmb);
     return resultado;
   } catch (error: any) {
+    if (naoChegouASefaz(error)) return naoEnviado(error);
     return {
       success: false,
       status: 'erro',
@@ -1023,6 +1025,7 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
     completarXmls(resultado, signedXml, tpAmb);
     return resultado;
   } catch (error: any) {
+    if (naoChegouASefaz(error)) return naoEnviado(error);
     return {
       success: false,
       status: 'erro',
@@ -1033,6 +1036,21 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
       xmlAssinado: xmlEnviado,
     };
   }
+}
+
+/**
+ * A emissão que não chegou à SEFAZ: sem chave e sem XML assinado (a nota não existe lá, não há
+ * o que consultar) — o emissor pode reenviar com o mesmo número, ou ir em contingência com ele.
+ */
+function naoEnviado(error: Error): SefazResponse {
+  return {
+    success: false,
+    status: 'erro',
+    codigoStatus: 'ERR',
+    motivoStatus: error.message,
+    erros: [error.message],
+    naoEnviado: true,
+  };
 }
 
 /**
@@ -1174,12 +1192,16 @@ export async function transmitirNFCeContingencia(
     delete resultado.protNFeXml;
     return resultado;
   } catch (error: any) {
+    // A chave da contingência é fixa (está no XML): reenviar o mesmo XML é seguro.
+    const idMatch = signedXml.match(/Id="NFe(\d{44})"/);
     return {
       success: false,
       status: 'erro',
       codigoStatus: 'ERR',
       motivoStatus: error.message || 'Erro desconhecido ao transmitir NFC-e em contingência',
       erros: [error.message],
+      chaveAcesso: idMatch ? idMatch[1] : undefined,
+      ...(naoChegouASefaz(error) ? { naoEnviado: true } : {}),
     };
   }
 }

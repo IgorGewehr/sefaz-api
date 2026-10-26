@@ -263,6 +263,7 @@ const documentation = {
             dataRecebimento: 'string — ISO 8601',
             xml: 'string — XML assinado com protocolo (para armazenamento/DANFE); também na denegada',
             xmlAssinado: 'string — só no desfecho incerto (processando/erro): guarde e mande em /nfe/consultar',
+            naoEnviado: 'boolean — o pedido com certeza não chegou à SEFAZ (circuito aberto, sem conexão, 503): vem sem chave nem xmlAssinado; o número continua livre (reenviar, ou ir em contingência com ele)',
           },
         },
         resposta_rejeicao: {
