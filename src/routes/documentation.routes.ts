@@ -429,6 +429,75 @@ const documentation = {
 
       {
         method: 'POST',
+        path: '/nfe/dfe/distribuicao',
+        descricao: 'Uma página (até 50 documentos) da Distribuição DF-e do Ambiente Nacional: as NF-e e os eventos em que o CNPJ aparece (compras, sobretudo). Sem estado: o cliente guarda o NSU. Peça a partir do ultNSU devolvido; quando ultNSU alcança maxNSU, só volte depois de 1 hora. 656 (consumo indevido) = esperar 1 hora. Resposta com status erro: não avance o NSU.',
+        autenticacao: true,
+        request_body: {
+          cnpj: 'string — OBRIGATÓRIO, o do destinatário (o do certificado)',
+          ufAutor: 'string — OBRIGATÓRIO, sigla ("RS") ou código IBGE ("43") da UF do interessado',
+          ultNSU: 'string|number — o último NSU já lido (0 ou ausente = desde o início)',
+          certificado: { pfxBase64: 'string — OBRIGATÓRIO', password: 'string — OBRIGATÓRIO' },
+        },
+        resposta_sucesso: {
+          status: 200,
+          body: {
+            success: true,
+            status: "'ok' | 'consumo_indevido' | 'rejeitado' | 'erro'",
+            codigoStatus: "'138' (há documentos) | '137' (nenhum) | '656'",
+            motivoStatus: 'string',
+            ultNSU: 'string — 15 dígitos; vazio quando a resposta não o trouxe',
+            maxNSU: 'string — 15 dígitos',
+            documentos: [{
+              nsu: 'string — 15 dígitos',
+              schema: 'string — ex.: resNFe_v1.01.xsd',
+              tipo: "'resNFe' | 'procNFe' | 'resEvento' | 'procEventoNFe' | 'outro'",
+              chaveAcesso: 'string',
+              xml: 'string — descompactado',
+            }],
+          },
+        },
+      },
+
+      {
+        method: 'POST',
+        path: '/nfe/dfe/consulta-chave',
+        descricao: 'Os documentos DF-e de uma chave: a nota completa (procNFe) se o destinatário já deu ciência; senão o resumo (resNFe).',
+        autenticacao: true,
+        request_body: {
+          cnpj: 'string — OBRIGATÓRIO',
+          ufAutor: 'string — OBRIGATÓRIO',
+          chaveAcesso: 'string — OBRIGATÓRIO, 44 dígitos',
+          certificado: { pfxBase64: 'string — OBRIGATÓRIO', password: 'string — OBRIGATÓRIO' },
+        },
+        resposta_sucesso: 'Mesmo formato de /nfe/dfe/distribuicao',
+      },
+
+      {
+        method: 'POST',
+        path: '/nfe/manifestacao',
+        descricao: 'Manifestação do Destinatário no Ambiente Nacional: ciencia (210210, libera o XML completo), confirmacao (210200), desconhecimento (210220), nao_realizada (210240, com justificativa). 573 = já manifestado.',
+        autenticacao: true,
+        request_body: {
+          cnpj: 'string — OBRIGATÓRIO, o do destinatário',
+          chaveAcesso: 'string — OBRIGATÓRIO, 44 dígitos',
+          tipo: "'ciencia' | 'confirmacao' | 'desconhecimento' | 'nao_realizada'",
+          justificativa: 'string — 15 a 255 caracteres, só na nao_realizada',
+          certificado: { pfxBase64: 'string — OBRIGATÓRIO', password: 'string — OBRIGATÓRIO' },
+        },
+        resposta_sucesso: {
+          status: 200,
+          body: {
+            success: true,
+            status: 'autorizado',
+            codigoStatus: '135',
+            protocolo: 'string',
+            xml: 'string — procEventoNFe da manifestação',
+          },
+        },
+      },
+
+      {
+        method: 'POST',
         path: '/nfe/status',
         descricao: 'Consulta o status do serviço da SEFAZ (se está online/operacional). Útil para verificar disponibilidade antes de emitir.',
         autenticacao: true,

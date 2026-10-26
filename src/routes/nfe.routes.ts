@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import * as nfeService from '../services/nfe.service';
+import * as dfeService from '../services/dfe.service';
 import { validarCNPJ, validarCPF, validarChaveAcesso, parsePfx, certCnpjBate } from '../lib/utils';
 import { config } from '../config';
 import type { CertificateData } from '../types';
@@ -12,6 +13,11 @@ import type {
   NFeConsultaRequest,
   StatusServicoRequest,
 } from '../types';
+import type {
+  DfeConsultaChaveRequest,
+  DfeDistribuicaoRequest,
+  ManifestacaoRequest,
+} from '../services/dfe.service';
 
 const router = Router();
 
@@ -344,6 +350,98 @@ router.post('/inutilizar', async (req: Request, res: Response) => {
     res.status(statusCode).json(result);
   } catch (err: any) {
     console.error('[NFe] Erro ao inutilizar:', err.message);
+    res.status(500).json({ error: 'Erro interno ao processar a requisição' });
+  }
+});
+
+/** Validação comum do destinatário das rotas de DF-e: CNPJ, UF e certificado do mesmo CNPJ. */
+function destinatarioInvalido(
+  res: Response,
+  data: { cnpj?: string; ufAutor?: string; certificado?: CertificateData },
+  exigeUf: boolean,
+): boolean {
+  if (!data.cnpj || !validarCNPJ(data.cnpj)) {
+    res.status(400).json({ error: 'cnpj inválido (o do destinatário, dono do certificado)' });
+    return true;
+  }
+  if (exigeUf) {
+    try {
+      dfeService.codigoUf(data.ufAutor ?? '');
+    } catch {
+      res.status(400).json({ error: 'ufAutor é obrigatório: sigla ("RS") ou código IBGE ("43")' });
+      return true;
+    }
+  }
+  if (!data.certificado?.pfxBase64 || !data.certificado?.password) {
+    res.status(400).json({ error: 'Certificado digital é obrigatório' });
+    return true;
+  }
+  return certMismatch(res, data.certificado, data.cnpj);
+}
+
+// POST /nfe/dfe/distribuicao - Uma página da distribuição DF-e (notas contra o CNPJ)
+router.post('/dfe/distribuicao', async (req: Request, res: Response) => {
+  try {
+    const data: DfeDistribuicaoRequest = req.body;
+    if (data.ultNSU !== undefined && !/^\d{1,15}$/.test(String(data.ultNSU))) {
+      res.status(400).json({ error: 'ultNSU deve ter até 15 dígitos' });
+      return;
+    }
+    if (destinatarioInvalido(res, data, true)) return;
+
+    const result = await dfeService.consultarDistribuicao(data);
+    res.status(result.status === 'ok' || result.status === 'consumo_indevido' ? 200 : 422).json(result);
+  } catch (err: any) {
+    console.error('[DFe] Erro na distribuição:', err.message);
+    res.status(500).json({ error: 'Erro interno ao processar a requisição' });
+  }
+});
+
+// POST /nfe/dfe/consulta-chave - Os documentos DF-e de uma chave
+router.post('/dfe/consulta-chave', async (req: Request, res: Response) => {
+  try {
+    const data: DfeConsultaChaveRequest = req.body;
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
+      return;
+    }
+    if (destinatarioInvalido(res, data, true)) return;
+
+    const result = await dfeService.consultarPorChave(data);
+    res.status(result.status === 'ok' || result.status === 'consumo_indevido' ? 200 : 422).json(result);
+  } catch (err: any) {
+    console.error('[DFe] Erro na consulta por chave:', err.message);
+    res.status(500).json({ error: 'Erro interno ao processar a requisição' });
+  }
+});
+
+// POST /nfe/manifestacao - Manifestação do Destinatário (ciência, confirmação, desconhecimento, não realizada)
+router.post('/manifestacao', async (req: Request, res: Response) => {
+  try {
+    const data: ManifestacaoRequest = req.body;
+    if (!data.chaveAcesso || !validarChaveAcesso(data.chaveAcesso)) {
+      res.status(400).json({ error: 'chaveAcesso inválida (44 dígitos + DV módulo 11)' });
+      return;
+    }
+    if (!data.tipo || !(data.tipo in dfeService.MANIFESTACOES)) {
+      res.status(400).json({
+        error: `tipo deve ser um de: ${Object.keys(dfeService.MANIFESTACOES).join(', ')}`,
+      });
+      return;
+    }
+    if (
+      data.tipo === 'nao_realizada' &&
+      (!data.justificativa || data.justificativa.length < 15 || data.justificativa.length > 255)
+    ) {
+      res.status(400).json({ error: 'justificativa deve ter entre 15 e 255 caracteres' });
+      return;
+    }
+    if (destinatarioInvalido(res, data, false)) return;
+
+    const result = await dfeService.manifestar(data);
+    res.status(result.success ? 200 : 422).json(result);
+  } catch (err: any) {
+    console.error('[DFe] Erro na manifestação:', err.message);
     res.status(500).json({ error: 'Erro interno ao processar a requisição' });
   }
 });
