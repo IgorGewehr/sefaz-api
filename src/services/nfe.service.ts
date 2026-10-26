@@ -435,6 +435,83 @@ export function extrairProtNFe(soapXml: string): string | undefined {
   return m ? m[0] : undefined;
 }
 
+/** cStat de nota com protocolo que precisa ser guardada: autorizada (100, 150) ou denegada. */
+const COM_PROTOCOLO = ['100', '150', '110', '301', '302', '303'];
+
+/** cStat da consulta de nota cancelada (101; 151 e 155 fora de prazo). */
+const CANCELADA = ['101', '151', '155'];
+
+/**
+ * Monta o procEventoNFe (evento assinado + retEvento literal da SEFAZ) — o XML do
+ * cancelamento ou da CC-e que o emissor guarda por 5 anos, junto do nfeProc.
+ * `undefined` se a resposta não trouxe o retEvento. Exportada para testes (pura).
+ */
+export function montarProcEventoNFe(envEventoAssinado: string, soapXml: string): string | undefined {
+  const evento = envEventoAssinado.match(/<evento[\s>][\s\S]*?<\/evento>/);
+  const retEvento = soapXml.match(/<retEvento[\s>][\s\S]*?<\/retEvento>/);
+  if (!evento || !retEvento) return undefined;
+  return `<procEventoNFe versao="1.00" xmlns="${SEFAZ_NS}">` + evento[0] + retEvento[0] + `</procEventoNFe>`;
+}
+
+/**
+ * Monta o procInutNFe (pedido assinado + retInutNFe literal) — a prova da inutilização,
+ * guardada por 5 anos. `undefined` se a resposta não trouxe o retInutNFe. Exportada para
+ * testes (pura).
+ */
+export function montarProcInutNFe(inutAssinado: string, soapXml: string): string | undefined {
+  const inut = inutAssinado.match(/<inutNFe[\s>][\s\S]*<\/inutNFe>/);
+  const ret = soapXml.match(/<retInutNFe[\s>][\s\S]*?<\/retInutNFe>/);
+  if (!inut || !ret) return undefined;
+  return `<procInutNFe versao="4.00" xmlns="${SEFAZ_NS}">` + inut[0] + ret[0] + `</procInutNFe>`;
+}
+
+/**
+ * O procEventoNFe do cancelamento (110111, ou 110112 por substituição) registrado,
+ * entre os eventos que a consulta da nota devolve. Sai com o namespace na raiz, para
+ * ser guardado sozinho. Exportada para testes (pura).
+ */
+export function extrairProcCancelamento(soapXml: string): string | undefined {
+  for (const m of soapXml.matchAll(/<procEventoNFe[\s>][\s\S]*?<\/procEventoNFe>/g)) {
+    const proc = m[0];
+    const tipo = proc.match(/<tpEvento>(\d+)<\/tpEvento>/)?.[1];
+    const ret = proc.match(/<retEvento[\s>][\s\S]*?<\/retEvento>/)?.[0] ?? '';
+    const cStat = ret.match(/<cStat>(\d+)<\/cStat>/)?.[1];
+    if ((tipo === '110111' || tipo === '110112') && ['135', '136', '155'].includes(cStat ?? '')) {
+      const abertura = proc.match(/^<procEventoNFe[^>]*>/)![0];
+      return abertura.includes('xmlns=')
+        ? proc
+        : proc.replace(abertura, abertura.replace('<procEventoNFe', `<procEventoNFe xmlns="${SEFAZ_NS}"`));
+    }
+  }
+  return undefined;
+}
+
+/**
+ * O nfeProc de uma consulta: a NF-e que o emissor assinou + o protNFe literal da consulta.
+ * Só quando o XML é mesmo o da nota consultada — mesma chave e mesmo digest que a SEFAZ
+ * registrou no protocolo. Exportada para testes (pura).
+ */
+export function nfeProcDaConsulta(
+  xmlAssinado: string,
+  chaveAcesso: string,
+  soapXml: string,
+  tpAmb: '1' | '2',
+): string | undefined {
+  const protNFe = extrairProtNFe(soapXml);
+  if (!protNFe) return undefined;
+  const cStat = protNFe.match(/<cStat>(\d+)<\/cStat>/)?.[1] ?? '';
+  if (!COM_PROTOCOLO.includes(cStat)) return undefined;
+  if (xmlAssinado.match(/Id="NFe(\d{44})"/)?.[1] !== chaveAcesso) return undefined;
+  const digVal = protNFe.match(/<digVal>([^<]+)<\/digVal>/)?.[1];
+  const digest = xmlAssinado.match(/<DigestValue>([^<]+)<\/DigestValue>/)?.[1];
+  if (digVal && digest && digVal !== digest) return undefined;
+  return buildNfeProcEnvelope(
+    xmlAssinado,
+    { success: true, status: 'autorizado', codigoStatus: cStat, motivoStatus: '', protNFeXml: protNFe },
+    tpAmb,
+  );
+}
+
 /**
  * Envolve a NFe assinada no envelope enviNFe para autorização
  */
@@ -506,6 +583,8 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
   // Disponível no catch: se a chave já foi gerada antes do erro, devolvê-la
   // permite ao emissor consultar/recuperar a nota em vez de re-emitir às cegas.
   let chaveGerada: string | undefined;
+  // O XML que foi à SEFAZ — volta no desfecho incerto para a consulta montar o nfeProc.
+  let xmlEnviado: string | undefined;
   try {
     // VALIDAÇÃO ANTES DE GERAR XML
     const validationErrors = validateNFePayload(request);
@@ -542,6 +621,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
     // 4. Envelopar no enviNFe (síncrono: indSinc=1 para lote com 1 NF-e)
     const loteId = gerarIdLote();
     const soapBody = wrapEnviNFe(signedXml, loteId, '1');
+    xmlEnviado = signedXml;
 
     // 5. Obter endpoint e enviar
     const endpoints = getNFeEndpoints(request.ufEmitente, ambiente);
@@ -577,12 +657,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
         pollingResult.nRec = nRec;
       }
 
-      // Incluir XML autorizado (nfeProc) na resposta se autorizado
-      if (pollingResult.success) {
-        pollingResult.xml = buildNfeProcEnvelope(signedXml, pollingResult, tpAmb);
-      }
-
-      delete pollingResult.protNFeXml;
+      completarXmls(pollingResult, signedXml, tpAmb);
       return pollingResult;
     }
 
@@ -590,11 +665,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
     if (!resultado.chaveAcesso) {
       resultado.chaveAcesso = chaveAcesso;
     }
-    if (resultado.success) {
-      resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
-    }
-
-    delete resultado.protNFeXml;
+    completarXmls(resultado, signedXml, tpAmb);
     return resultado;
   } catch (error: any) {
     return {
@@ -604,8 +675,23 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
       motivoStatus: error.message || 'Erro desconhecido ao emitir NFe',
       erros: [error.message],
       chaveAcesso: chaveGerada,
+      xmlAssinado: xmlEnviado,
     };
   }
+}
+
+/**
+ * Os XMLs da resposta de uma emissão: o nfeProc da nota autorizada ou denegada (a denegada
+ * também é guardada, com o protocolo da denegação), e o XML assinado quando o desfecho
+ * ficou incerto — para a consulta montar o nfeProc depois.
+ */
+function completarXmls(resultado: SefazResponse, signedXml: string, tpAmb: '1' | '2'): void {
+  if (resultado.success || resultado.status === 'denegado') {
+    resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
+  } else if (resultado.status === 'processando' || resultado.status === 'erro') {
+    resultado.xmlAssinado = signedXml;
+  }
+  delete resultado.protNFeXml;
 }
 
 /**
@@ -858,6 +944,7 @@ function validateNFCePayload(req: NFCeRequest): string[] {
  */
 export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
   let chaveGerada: string | undefined;
+  let xmlEnviado: string | undefined;
   try {
     // Guarda: payload com `contingencia` aqui geraria chave com tpEmis=1 e
     // XML com tpEmis=9 (buildNFCeXml lê request.contingencia) → rejeição 502
@@ -913,6 +1000,7 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
     // 5. Envelopar no enviNFe (síncrono: indSinc=1)
     const loteId = gerarIdLote();
     const soapBody = wrapEnviNFe(signedXml, loteId, '1');
+    xmlEnviado = signedXml;
 
     // 6. Obter endpoint e enviar
     const endpoints = getNFCeEndpoints(request.ufEmitente, ambiente);
@@ -932,11 +1020,7 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
     if (!resultado.chaveAcesso) {
       resultado.chaveAcesso = chaveAcesso;
     }
-    if (resultado.success) {
-      resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
-    }
-
-    delete resultado.protNFeXml;
+    completarXmls(resultado, signedXml, tpAmb);
     return resultado;
   } catch (error: any) {
     return {
@@ -946,6 +1030,7 @@ export async function emitirNFCe(request: NFCeRequest): Promise<SefazResponse> {
       motivoStatus: error.message || 'Erro desconhecido ao emitir NFCe',
       erros: [error.message],
       chaveAcesso: chaveGerada,
+      xmlAssinado: xmlEnviado,
     };
   }
 }
@@ -1081,7 +1166,8 @@ export async function transmitirNFCeContingencia(
       if (idMatch) resultado.chaveAcesso = idMatch[1];
     }
 
-    if (resultado.success) {
+    // O emissor já guarda o XML assinado (veio do prepare): o xmlAssinado não volta.
+    if (resultado.success || resultado.status === 'denegado') {
       resultado.xml = buildNfeProcEnvelope(signedXml, resultado, tpAmb);
     }
 
@@ -1139,15 +1225,34 @@ export async function consultarProtocolo(request: NFeConsultaRequest): Promise<S
     if (protNFe) {
       const infProt = protNFe['infProt'] || protNFe;
       const protStat = String(infProt['cStat'] || cStat);
-      return {
-        success: protStat === '100' || protStat === '150',
-        status: interpretarStatus(protStat),
-        codigoStatus: protStat,
-        motivoStatus: String(infProt['xMotivo'] || xMotivo),
-        chaveAcesso: request.chaveAcesso,
-        protocolo: String(infProt['nProt'] || ''),
-        dataRecebimento: String(infProt['dhRecbto'] || ''),
-      };
+      // Nota cancelada: o protNFe ainda é o da autorização (cStat 100) — o desfecho é o
+      // cStat da consulta (101/151/155), e o XML do cancelamento vem nos eventos.
+      const cancelada = CANCELADA.includes(cStat);
+      const resultado: SefazResponse = cancelada
+        ? {
+            success: false,
+            status: 'cancelado',
+            codigoStatus: cStat,
+            motivoStatus: xMotivo,
+            chaveAcesso: request.chaveAcesso,
+            protocolo: String(infProt['nProt'] || ''),
+            dataRecebimento: String(infProt['dhRecbto'] || ''),
+            xmlCancelamento: extrairProcCancelamento(soapResponse),
+          }
+        : {
+            success: protStat === '100' || protStat === '150',
+            status: interpretarStatus(protStat),
+            codigoStatus: protStat,
+            motivoStatus: String(infProt['xMotivo'] || xMotivo),
+            chaveAcesso: request.chaveAcesso,
+            protocolo: String(infProt['nProt'] || ''),
+            dataRecebimento: String(infProt['dhRecbto'] || ''),
+          };
+      if (request.xmlAssinado) {
+        const xml = nfeProcDaConsulta(request.xmlAssinado, request.chaveAcesso, soapResponse, tpAmb);
+        if (xml) resultado.xml = xml;
+      }
+      return resultado;
     }
 
     return {
@@ -1231,7 +1336,7 @@ export async function cancelarNFe(request: NFeCancelarRequest): Promise<SefazRes
     );
 
     const retorno = extrairRetorno(soapResponse);
-    return parseRetEvento(retorno, chave);
+    return comProcEvento(parseRetEvento(retorno, chave), signedXml, soapResponse);
   } catch (error: any) {
     return {
       success: false,
@@ -1310,7 +1415,7 @@ export async function cartaCorrecao(request: NFeCartaCorrecaoRequest): Promise<S
     );
 
     const retorno = extrairRetorno(soapResponse);
-    return parseRetEvento(retorno, chave);
+    return comProcEvento(parseRetEvento(retorno, chave), signedXml, soapResponse);
   } catch (error: any) {
     return {
       success: false,
@@ -1402,7 +1507,7 @@ export async function inutilizar(request: NFeInutilizarRequest): Promise<SefazRe
     const cStat = String(infInut['cStat'] || '');
     const xMotivo = String(infInut['xMotivo'] || '');
 
-    return {
+    const resultado: SefazResponse = {
       success: cStat === '102',
       status: interpretarStatus(cStat),
       codigoStatus: cStat,
@@ -1410,6 +1515,10 @@ export async function inutilizar(request: NFeInutilizarRequest): Promise<SefazRe
       protocolo: String(infInut['nProt'] || ''),
       dataRecebimento: String(infInut['dhRecbto'] || ''),
     };
+    if (resultado.success) {
+      resultado.xml = montarProcInutNFe(signedXml, soapResponse);
+    }
+    return resultado;
   } catch (error: any) {
     return {
       success: false,
@@ -1482,6 +1591,14 @@ export async function statusServico(request: StatusServicoRequest): Promise<Sefa
 // ============================================================
 // Helpers de parsing de retorno de evento
 // ============================================================
+
+/** O evento registrado ganha o procEventoNFe em `xml`. */
+function comProcEvento(resultado: SefazResponse, envEventoAssinado: string, soapXml: string): SefazResponse {
+  if (resultado.success) {
+    resultado.xml = montarProcEventoNFe(envEventoAssinado, soapXml);
+  }
+  return resultado;
+}
 
 /**
  * Parseia o retorno de um evento (cancelamento, CCe).

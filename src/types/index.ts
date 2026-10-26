@@ -352,6 +352,12 @@ export interface SefazResponse {
   nRec?: string; // Número do recibo (para polling assíncrono)
   dataRecebimento?: string;
   xml?: string; // XML autorizado (assinado + protocolo)
+  /** NF-e/NFC-e assinada que foi à SEFAZ, quando o desfecho ficou incerto (processando,
+   *  falha de comunicação depois de assinar). Guarde-a e mande de volta em
+   *  `/nfe/consultar` (`xmlAssinado`): se a SEFAZ autorizou, a consulta devolve o nfeProc. */
+  xmlAssinado?: string;
+  /** Na consulta de nota cancelada: o procEventoNFe do cancelamento, como a SEFAZ o registrou. */
+  xmlCancelamento?: string;
   erros?: string[];
   /** Fragmento <protNFe> literal extraído da resposta SOAP da SEFAZ.
    *  Uso interno para montar o nfeProc com o protocolo real (verAplic/digVal);
@@ -421,6 +427,9 @@ export interface NFeInutilizarRequest {
 
 export interface NFeConsultaRequest {
   chaveAcesso: string;
+  /** A NF-e/NFC-e assinada (o `xmlAssinado` de uma emissão incerta). Com ela, a consulta
+   *  de nota autorizada ou denegada devolve o nfeProc em `xml`. */
+  xmlAssinado?: string;
   certificado: CertificateData;
   ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;

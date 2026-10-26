@@ -234,6 +234,10 @@ router.post('/consultar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'ufEmitente é obrigatório' });
       return;
     }
+    if (data.xmlAssinado !== undefined && typeof data.xmlAssinado !== 'string') {
+      res.status(400).json({ error: 'xmlAssinado deve ser o XML (texto) da NF-e assinada' });
+      return;
+    }
 
     const result = await nfeService.consultarProtocolo(data);
     res.json(result);
