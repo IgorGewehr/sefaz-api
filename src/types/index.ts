@@ -84,6 +84,15 @@ export interface NFeItem {
     indTot: '0' | '1'; // 0=Não compõe total, 1=Compõe
   };
   imposto: NFeItemImposto;
+  /**
+   * impostoDevol (NT 2016.002): o IPI devolvido por quem não é contribuinte do IPI (o comércio
+   * devolvendo a compra à indústria). `percentualDevolvido` = pDevol (0–100) e
+   * `valorIPIDevolvido` = vIPIDevol, que soma no vNF.
+   */
+  impostoDevol?: {
+    percentualDevolvido: number;
+    valorIPIDevolvido: number;
+  };
 }
 
 export interface NFeItemImposto {
@@ -99,6 +108,12 @@ export interface NFeItemImposto {
     valorBCST?: number;
     aliquotaST?: number;
     valorST?: number;
+    /** pMVAST: a margem de valor agregado do ST (modBCST 4). */
+    mvaST?: number;
+    /** FCP do ST: vBCFCPST, pFCPST, vFCPST (somam no vFCPST e no vNF). */
+    valorBCFCPST?: number;
+    aliquotaFCPST?: number;
+    valorFCPST?: number;
     pRedBC?: number;
   };
   pis: {

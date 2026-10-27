@@ -147,6 +147,23 @@ function getIcmsGroupName(imposto: NFeItemImposto, crt: string): string {
 /**
  * Constroi o grupo ICMS do item
  */
+/**
+ * O ST do grupo de ICMS, na ordem do XSD: modBCST, pMVAST, vBCST, pICMSST, vICMSST e o FCP do ST
+ * (vBCFCPST, pFCPST, vFCPST).
+ */
+function adicionarST(group: Record<string, any>, icms: NFeItemImposto['icms']): void {
+  if (icms.modBCST) group['modBCST'] = icms.modBCST;
+  if (icms.mvaST !== undefined) group['pMVAST'] = formatarValor(icms.mvaST);
+  if (icms.valorBCST !== undefined) group['vBCST'] = formatarValor(icms.valorBCST);
+  if (icms.aliquotaST !== undefined) group['pICMSST'] = formatarValor(icms.aliquotaST);
+  if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
+  if (icms.valorFCPST !== undefined && icms.valorFCPST > 0) {
+    group['vBCFCPST'] = formatarValor(icms.valorBCFCPST ?? icms.valorBCST ?? 0);
+    group['pFCPST'] = formatarValor(icms.aliquotaFCPST ?? 0);
+    group['vFCPST'] = formatarValor(icms.valorFCPST);
+  }
+}
+
 function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, any> {
   const groupName = getIcmsGroupName(imposto, crt);
   const icms = imposto.icms;
@@ -165,10 +182,7 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
       if (icms.aliquota !== undefined) group['pCredSN'] = formatarValor(icms.aliquota);
       if (icms.valor !== undefined) group['vCredICMSSN'] = formatarValor(icms.valor);
     } else if (groupName === 'ICMSSN201' || groupName === 'ICMSSN202') {
-      if (icms.modBCST) group['modBCST'] = icms.modBCST;
-      if (icms.valorBCST !== undefined) group['vBCST'] = formatarValor(icms.valorBCST);
-      if (icms.aliquotaST !== undefined) group['pICMSST'] = formatarValor(icms.aliquotaST);
-      if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
+      adicionarST(group, icms);
     } else if (groupName === 'ICMSSN500') {
       if (icms.valorBCST !== undefined) group['vBCSTRet'] = formatarValor(icms.valorBCST);
       if (icms.valorST !== undefined) group['vICMSSTRet'] = formatarValor(icms.valorST);
@@ -177,10 +191,7 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
       if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
       if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
       if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
-      if (icms.modBCST) group['modBCST'] = icms.modBCST;
-      if (icms.valorBCST !== undefined) group['vBCST'] = formatarValor(icms.valorBCST);
-      if (icms.aliquotaST !== undefined) group['pICMSST'] = formatarValor(icms.aliquotaST);
-      if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
+      adicionarST(group, icms);
     }
     // ICMSSN102 (102, 103, 300, 400) - só orig e CSOSN
   } else {
@@ -214,10 +225,7 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
         if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
-        if (icms.modBCST) group['modBCST'] = icms.modBCST;
-        if (icms.valorBCST !== undefined) group['vBCST'] = formatarValor(icms.valorBCST);
-        if (icms.aliquotaST !== undefined) group['pICMSST'] = formatarValor(icms.aliquotaST);
-        if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
+        adicionarST(group, icms);
         break;
       case 'ICMS15':
         // CST 15 - Tributação monofásica própria e com responsabilidade pela retenção sobre combustíveis
@@ -239,10 +247,7 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
         break;
       case 'ICMS30':
-        if (icms.modBCST) group['modBCST'] = icms.modBCST;
-        if (icms.valorBCST !== undefined) group['vBCST'] = formatarValor(icms.valorBCST);
-        if (icms.aliquotaST !== undefined) group['pICMSST'] = formatarValor(icms.aliquotaST);
-        if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
+        adicionarST(group, icms);
         break;
       case 'ICMS40':
         // CST 40, 41, 50 - Isento, não tributado, suspensão - apenas orig e CST
@@ -270,10 +275,7 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
         if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
-        if (icms.modBCST) group['modBCST'] = icms.modBCST;
-        if (icms.valorBCST !== undefined) group['vBCST'] = formatarValor(icms.valorBCST);
-        if (icms.aliquotaST !== undefined) group['pICMSST'] = formatarValor(icms.aliquotaST);
-        if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
+        adicionarST(group, icms);
         break;
       case 'ICMS90':
         if (!icms.modBC) {
@@ -283,10 +285,7 @@ function buildIcmsGroup(imposto: NFeItemImposto, crt: string): Record<string, an
         if (icms.valorBC !== undefined) group['vBC'] = formatarValor(icms.valorBC);
         if (icms.aliquota !== undefined) group['pICMS'] = formatarValor(icms.aliquota);
         if (icms.valor !== undefined) group['vICMS'] = formatarValor(icms.valor);
-        if (icms.modBCST) group['modBCST'] = icms.modBCST;
-        if (icms.valorBCST !== undefined) group['vBCST'] = formatarValor(icms.valorBCST);
-        if (icms.aliquotaST !== undefined) group['pICMSST'] = formatarValor(icms.aliquotaST);
-        if (icms.valorST !== undefined) group['vICMSST'] = formatarValor(icms.valorST);
+        adicionarST(group, icms);
         break;
     }
   }
@@ -470,6 +469,7 @@ function calcularTotais(itens: NFeItem[]): Record<string, string> {
     vICMS += imp.icms.valor || 0;
     vBCST += imp.icms.valorBCST || 0;
     vST += imp.icms.valorST || 0;
+    vFCPST += imp.icms.valorFCPST || 0;
 
     // PIS/COFINS
     vPIS += imp.pis.valor || 0;
@@ -479,9 +479,11 @@ function calcularTotais(itens: NFeItem[]): Record<string, string> {
     if (imp.ipi) {
       vIPI += imp.ipi.valor || 0;
     }
+    vIPIDevol += item.impostoDevol?.valorIPIDevolvido || 0;
   }
 
-  const vNF = vProd + vST + vFrete + vSeg + vOutro + vII + vIPI - vDesc;
+  // vNF (NT 2016.002): vProd − vDesc + vST + vFCPST + vFrete + vSeg + vOutro + vII + vIPI + vIPIDevol.
+  const vNF = vProd + vST + vFCPST + vFrete + vSeg + vOutro + vII + vIPI + vIPIDevol - vDesc;
 
   return {
     vBC: formatarValor(vBC),
@@ -743,11 +745,19 @@ function buildDetGroups(itens: NFeItem[], crt: string): Array<Record<string, any
     // COFINS
     impostoGroup['COFINS'] = buildCofinsGroup(item.imposto.cofins);
 
-    return {
+    const det: Record<string, any> = {
       '@nItem': String(item.numero),
       prod,
       imposto: impostoGroup,
     };
+    // impostoDevol vem depois de <imposto> (e antes de infAdProd).
+    if (item.impostoDevol) {
+      det['impostoDevol'] = {
+        pDevol: formatarValor(item.impostoDevol.percentualDevolvido),
+        IPI: { vIPIDevol: formatarValor(item.impostoDevol.valorIPIDevolvido) },
+      };
+    }
+    return det;
   });
 }
 

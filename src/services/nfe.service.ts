@@ -79,7 +79,7 @@ function validateTaxCalculation(
 /**
  * Valida payload de NF-e antes de gerar XML
  */
-function validateNFePayload(req: NFeRequest): string[] {
+export function validateNFePayload(req: NFeRequest): string[] {
   const errors: string[] = [];
 
   // Validar campos básicos
@@ -212,10 +212,12 @@ function validateNFePayload(req: NFeRequest): string[] {
               errors.push(`Item ${idx}: modalidade BC ST obrigatória`);
             }
 
-            // Validar cálculo ST
+            // O ST é a base do ST × a alíquota MENOS o ICMS próprio: nunca passa do produto
+            // (a igualdade que se exigia recusava todo ST de verdade).
             if (icms.valorBCST && icms.aliquotaST !== undefined && icms.valorST !== undefined) {
-              if (!validateTaxCalculation(icms.valorBCST, icms.aliquotaST, icms.valorST)) {
-                errors.push(`Item ${idx}: valor ICMS ST inconsistente (esperado ${(icms.valorBCST * icms.aliquotaST / 100).toFixed(2)})`);
+              const teto = icms.valorBCST * icms.aliquotaST / 100;
+              if (icms.valorST > teto + 0.01) {
+                errors.push(`Item ${idx}: valor ICMS ST maior que a base × alíquota do ST (${teto.toFixed(2)})`);
               }
             }
           }
@@ -878,9 +880,12 @@ function validateNFCePayload(req: NFCeRequest): string[] {
               errors.push(`Item ${idx}: modalidade BC ST obrigatória`);
             }
 
+            // O ST é a base do ST × a alíquota MENOS o ICMS próprio: nunca passa do produto
+            // (a igualdade que se exigia recusava todo ST de verdade).
             if (icms.valorBCST && icms.aliquotaST !== undefined && icms.valorST !== undefined) {
-              if (!validateTaxCalculation(icms.valorBCST, icms.aliquotaST, icms.valorST)) {
-                errors.push(`Item ${idx}: valor ICMS ST inconsistente (esperado ${(icms.valorBCST * icms.aliquotaST / 100).toFixed(2)})`);
+              const teto = icms.valorBCST * icms.aliquotaST / 100;
+              if (icms.valorST > teto + 0.01) {
+                errors.push(`Item ${idx}: valor ICMS ST maior que a base × alíquota do ST (${teto.toFixed(2)})`);
               }
             }
           }
