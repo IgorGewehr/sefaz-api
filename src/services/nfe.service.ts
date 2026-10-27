@@ -1307,7 +1307,9 @@ export async function cancelarNFe(request: NFeCancelarRequest): Promise<SefazRes
     const chave = request.chaveAcesso;
     const cUF = chave.substring(0, 2);
     const cnpj = chave.substring(6, 20);
-    const tpEvento = '110111';
+    // Com a substituta, o cancelamento por substituição da NFC-e (110112, NT 2018.004).
+    const substituta = request.chaveSubstituta;
+    const tpEvento = substituta ? '110112' : '110111';
     const nSeqEvento = '1';
     const idEvento = `ID${tpEvento}${chave}${nSeqEvento.padStart(2, '0')}`;
     const dhEvento = formatarDataSefaz(undefined, request.ufEmitente);
@@ -1327,9 +1329,17 @@ export async function cancelarNFe(request: NFeCancelarRequest): Promise<SefazRes
       `<nSeqEvento>${nSeqEvento}</nSeqEvento>` +
       `<verEvento>1.00</verEvento>` +
       `<detEvento versao="1.00">` +
-      `<descEvento>Cancelamento</descEvento>` +
-      `<nProt>${request.protocolo}</nProt>` +
-      `<xJust>${escapeXml(request.justificativa)}</xJust>` +
+      (substituta
+        ? `<descEvento>Cancelamento por substituicao</descEvento>` +
+          `<cOrgaoAutor>${cUF}</cOrgaoAutor>` +
+          `<tpAutor>1</tpAutor>` +
+          `<verAplic>SefazAPI-1.0</verAplic>` +
+          `<nProt>${request.protocolo}</nProt>` +
+          `<xJust>${escapeXml(request.justificativa)}</xJust>` +
+          `<chNFeRef>${substituta}</chNFeRef>`
+        : `<descEvento>Cancelamento</descEvento>` +
+          `<nProt>${request.protocolo}</nProt>` +
+          `<xJust>${escapeXml(request.justificativa)}</xJust>`) +
       `</detEvento>` +
       `</infEvento>` +
       `</evento>` +

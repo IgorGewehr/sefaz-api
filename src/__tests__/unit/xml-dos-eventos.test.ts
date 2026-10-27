@@ -126,6 +126,31 @@ describe('cancelamento e CC-e devolvem o procEventoNFe', () => {
     expect(assinaturaConfere(xml.replace('Venda desfeita', 'Venda alterada'))).toBe(false);
   });
 
+  it('cancelamento por substituição (110112) referencia a substituta e a assinatura confere', async () => {
+    enviarSoap.mockResolvedValueOnce(respostaDoEvento('135', '110112'));
+    const substituta = '35260612345678000195650010000001249100000020';
+    const r = await cancelarNFe({
+      chaveAcesso: CHAVE,
+      protocolo: '135260000000001',
+      justificativa: 'NFC-e sem resposta, substituida pela emitida em contingencia',
+      certificado: pfxTeste().certificado,
+      ambiente: 'homologacao',
+      ufEmitente: 'SP',
+      chaveSubstituta: substituta,
+    });
+    expect(r.success).toBe(true);
+    const enviado: string = enviarSoap.mock.calls[0][2];
+    expect(enviado).toContain(`<infEvento Id="ID110112${CHAVE}01">`);
+    expect(enviado).toContain('<tpEvento>110112</tpEvento>');
+    expect(enviado).toContain(
+      '<descEvento>Cancelamento por substituicao</descEvento><cOrgaoAutor>35</cOrgaoAutor>' +
+        '<tpAutor>1</tpAutor><verAplic>SefazAPI-1.0</verAplic><nProt>135260000000001</nProt>',
+    );
+    expect(enviado).toContain(`<chNFeRef>${substituta}</chNFeRef></detEvento>`);
+    expect(r.xml).toContain('<tpEvento>110112</tpEvento>');
+    expect(assinaturaConfere(r.xml!)).toBe(true);
+  });
+
   it('cancelamento fora de prazo (155) também volta com o XML', async () => {
     enviarSoap.mockResolvedValueOnce(respostaDoEvento('155'));
     const r = await cancelarNFe({

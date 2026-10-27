@@ -406,6 +406,13 @@ export interface NFeCancelarRequest {
   certificado: CertificateData;
   ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;
+  /**
+   * Cancelamento por substituição (NFC-e, evento 110112, NT 2018.004): a chave da NFC-e emitida
+   * em contingência off-line (tpEmis 9) no lugar desta, que ficou sem resposta e foi autorizada.
+   * A substituta precisa estar autorizada, com o mesmo total e o mesmo número de itens; prazo de
+   * 168 horas.
+   */
+  chaveSubstituta?: string;
 }
 
 export interface NFeCartaCorrecaoRequest {

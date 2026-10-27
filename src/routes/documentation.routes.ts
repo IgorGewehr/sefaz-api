@@ -349,12 +349,13 @@ const documentation = {
       {
         method: 'POST',
         path: '/nfe/cancelar',
-        descricao: 'Cancela uma NFe/NFCe previamente autorizada. O cancelamento deve ocorrer dentro do prazo legal (geralmente 24h).',
+        descricao: 'Cancela uma NFe/NFCe previamente autorizada. O cancelamento deve ocorrer dentro do prazo legal (geralmente 24h). Com chaveSubstituta, o cancelamento por substituição da NFC-e (evento 110112): a nota que ficou sem resposta e foi autorizada, substituída por outra emitida em contingência — prazo de 168 h.',
         autenticacao: true,
         request_body: {
           chaveAcesso: 'string — OBRIGATÓRIO, 44 dígitos',
           protocolo: 'string — OBRIGATÓRIO, protocolo de autorização original',
           justificativa: 'string — OBRIGATÓRIO, 15 a 255 caracteres',
+          chaveSubstituta: 'string — opcional, NFC-e: a chave da substituta (emitida em contingência, tpEmis 9, já autorizada, mesmo total e número de itens) — vira o evento 110112',
           certificado: { pfxBase64: 'string — OBRIGATÓRIO', password: 'string — OBRIGATÓRIO' },
           ufEmitente: 'string — OBRIGATÓRIO',
         },

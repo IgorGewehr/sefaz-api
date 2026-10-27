@@ -278,6 +278,27 @@ router.post('/cancelar', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'ufEmitente é obrigatório' });
       return;
     }
+    if (data.chaveSubstituta !== undefined) {
+      const s = data.chaveSubstituta;
+      if (!validarChaveAcesso(s)) {
+        res.status(400).json({ error: 'chaveSubstituta inválida (44 dígitos + DV módulo 11)' });
+        return;
+      }
+      if (data.chaveAcesso.substring(20, 22) !== '65') {
+        res.status(400).json({ error: 'O cancelamento por substituição é só da NFC-e (modelo 65)' });
+        return;
+      }
+      if (s === data.chaveAcesso || s.substring(6, 20) !== data.chaveAcesso.substring(6, 20)) {
+        res.status(400).json({ error: 'A substituta precisa ser outra NFC-e do mesmo emitente' });
+        return;
+      }
+      if (s.charAt(34) !== '9') {
+        res.status(400).json({
+          error: 'A substituta precisa ter sido emitida em contingência off-line (tpEmis 9 na chave)',
+        });
+        return;
+      }
+    }
     // CNPJ sai da chave de acesso (posições 6-19)
     if (certMismatch(res, data.certificado, data.chaveAcesso.substring(6, 20))) return;
 
