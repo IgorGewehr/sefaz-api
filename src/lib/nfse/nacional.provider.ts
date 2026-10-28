@@ -534,8 +534,35 @@ function extrairMensagens(data: any): NfseMensagemRetorno[] {
   return msgs;
 }
 
-function parseEmitirResponse(status: number, data: any): NfseResponse {
+/** Número, código de verificação e emissão lidos do XML da NFS-e. */
+function camposDoXml(xml: string | null): Pick<NfseResponse, 'numeroNfse' | 'codigoVerificacao' | 'dataEmissao'> {
+  const n = xml?.match(/<nNFSe>(\d+)<\/nNFSe>/)?.[1];
+  return {
+    numeroNfse: n ? Number(n) : undefined,
+    codigoVerificacao: xml?.match(/<cNFSe>([^<]+)<\/cNFSe>/)?.[1],
+    dataEmissao: xml?.match(/<dhEmi>([^<]+)<\/dhEmi>/)?.[1],
+  };
+}
+
+/**
+ * A resposta do POST /nfse da SEFIN Nacional: `{ idDps, chaveAcesso, nfseXmlGZipB64, alertas }`.
+ * O formato antigo (`nfse.infNFSe` em JSON) ainda é lido, por compatibilidade. Antes só o antigo
+ * era lido — com a resposta de verdade saíam sem número, sem XML e sem a chave (que o
+ * cancelamento exige).
+ */
+export function parseEmitirResponse(status: number, data: any): NfseResponse {
   if (status >= 200 && status < 300) {
+    const xml = tryGunzipBase64(data?.nfseXmlGZipB64);
+    if (xml || data?.chaveAcesso) {
+      return {
+        success: true,
+        status: 'autorizado',
+        ...camposDoXml(xml),
+        chaveAcesso: data?.chaveAcesso ? String(data.chaveAcesso) : xml?.match(/Id="NFS(\d{50})"/)?.[1],
+        xml: xml || undefined,
+        protocolo: data?.idDps ? String(data.idDps) : undefined,
+      };
+    }
     return {
       success: true,
       status: 'autorizado',
@@ -794,7 +821,19 @@ export class NacionalProvider implements INfseProvider {
       if (status >= 200 && status < 300) {
         // GET /dps/{id} → { chaveAcesso }; GET /nfse/{chave} → { nfseXmlGZipB64, ... }
         const chaveRetornada = data?.chaveAcesso ? String(data.chaveAcesso) : (chave || undefined);
-        const nfseXml = tryGunzipBase64(data?.nfseXmlGZipB64);
+        let nfseXml = tryGunzipBase64(data?.nfseXmlGZipB64);
+        // Pelo DPS só vem a chave: busca a NFS-e por ela, para devolver o XML e o número (a
+        // recuperação pós-timeout precisa deles tanto quanto da chave).
+        if (!nfseXml && chaveRetornada && apenasNumeros(chaveRetornada).length === 50) {
+          const segunda = await httpRequest(
+            'GET',
+            `${endpoints.consultar}/${apenasNumeros(chaveRetornada)}`,
+            request.certificado,
+          );
+          if (segunda.status >= 200 && segunda.status < 300) {
+            nfseXml = tryGunzipBase64(segunda.data?.nfseXmlGZipB64);
+          }
+        }
 
         return {
           success: true,
@@ -805,6 +844,7 @@ export class NacionalProvider implements INfseProvider {
           codigoVerificacao: nfseXml?.match(/<cNFSe>([^<]+)<\/cNFSe>/)?.[1],
           dataEmissao: nfseXml?.match(/<dhEmi>([^<]+)<\/dhEmi>/)?.[1],
           protocolo: chaveRetornada,
+          chaveAcesso: chaveRetornada,
           xml: nfseXml || undefined,
           mensagens: chaveRetornada && !nfseXml
             ? [{ codigo: '200', mensagem: `DPS processado — NFS-e gerada com chave de acesso ${chaveRetornada}` }]

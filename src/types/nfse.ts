@@ -273,6 +273,8 @@ export interface NfseResponse {
   status: 'autorizado' | 'rejeitado' | 'processando' | 'cancelado' | 'erro';
   /** Número da NFS-e gerada (quando autorizado) */
   numeroNfse?: number;
+  /** Chave de acesso da NFS-e (50 dígitos, Padrão Nacional) — exigida para cancelar */
+  chaveAcesso?: string;
   /** Código de verificação da NFS-e */
   codigoVerificacao?: string;
   /** Protocolo do lote (para consulta assíncrona) */
