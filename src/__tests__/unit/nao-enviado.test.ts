@@ -53,6 +53,16 @@ let porta = 0;
 
 beforeAll(async () => {
   servidor = https.createServer({ key: servidorTls.chave, cert: servidorTls.cert }, (req, res) => {
+    if (req.url === '/eco') {
+      // Devolve o envelope recebido (para conferir o que sai).
+      let corpo = '';
+      req.on('data', (c) => { corpo += c; });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/soap+xml' });
+        res.end(corpo);
+      });
+      return;
+    }
     const status = Number(req.url?.split('/')[1] ?? '200');
     req.resume();
     req.on('end', () => {
@@ -85,6 +95,18 @@ async function erroDe(url: string): Promise<unknown> {
   }
   throw new Error('deveria ter falhado');
 }
+
+describe('enviarSoap: o envelope', () => {
+  it('com cabeçalho, o <Header> vem antes do <Body>; sem, não há <Header>', async () => {
+    const cab = '<nfeCabecMsg xmlns="urn:x"><cUF>91</cUF><versaoDados>1.01</versaoDados></nfeCabecMsg>';
+    const com = await enviarSoap(`https://127.0.0.1:${porta}/eco`, 'acao', '<x/>', cliente.pfx, '1.2', cab);
+    expect(com).toContain(`<soap12:Header>${cab}</soap12:Header>`);
+    expect(com.indexOf('<soap12:Header>')).toBeLessThan(com.indexOf('<soap12:Body>'));
+    const sem = await enviarSoap(`https://127.0.0.1:${porta}/eco`, 'acao', '<x/>', cliente.pfx);
+    expect(sem).not.toContain('Header');
+    expect(sem).toContain('<x/>');
+  });
+});
 
 describe('enviarSoap: o pedido chegou ou não à SEFAZ', () => {
   it('conexão recusada: não chegou', async () => {

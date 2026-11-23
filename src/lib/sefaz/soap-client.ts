@@ -119,6 +119,8 @@ export async function enviarSoap(
   xmlBody: string,
   certificado: CertificateData,
   soapVersion: '1.1' | '1.2' = '1.2',
+  /** O conteúdo do <Header> do envelope (ex.: o nfeCabecMsg da distribuição DF-e). */
+  cabecalho?: string,
 ): Promise<string> {
   const startTime = Date.now();
 
@@ -129,7 +131,8 @@ export async function enviarSoap(
   const soapPrefix = isSoap12 ? 'soap12' : 'soap';
 
   const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
-<${soapPrefix}:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:${soapPrefix}="${soapNs}">
+<${soapPrefix}:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:${soapPrefix}="${soapNs}">${cabecalho ? `
+  <${soapPrefix}:Header>${cabecalho}</${soapPrefix}:Header>` : ''}
   <${soapPrefix}:Body>
     ${xmlBody}
   </${soapPrefix}:Body>

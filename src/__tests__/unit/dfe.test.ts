@@ -199,8 +199,13 @@ describe('pedidos à SEFAZ', () => {
       ambiente: 'homologacao',
     });
     expect(r.status).toBe('ok');
-    const [url, acao, corpo] = enviarSoap.mock.calls[0];
+    const [url, acao, corpo, , versao, cabecalho] = enviarSoap.mock.calls[0];
     expect(url).toBe('https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx');
+    expect(versao).toBe('1.2');
+    expect(cabecalho).toBe(
+      '<nfeCabecMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">' +
+        '<cUF>91</cUF><versaoDados>1.01</versaoDados></nfeCabecMsg>',
+    );
     expect(acao).toBe('http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse');
     expect(corpo).toContain('<nfeDistDFeInteresse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe"><nfeDadosMsg>');
     expect(corpo).toContain(

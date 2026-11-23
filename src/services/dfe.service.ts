@@ -215,6 +215,13 @@ function corpoDistribuicao(interno: string): string {
   );
 }
 
+/**
+ * O cabeçalho SOAP da distribuição (cUF 91 = Ambiente Nacional, versão dos dados 1.01) — o que o
+ * gestao-raiz manda em produção (e o sped-nfe); o webservice do AN o declara no WSDL.
+ */
+const CABECALHO_DIST =
+  `<nfeCabecMsg xmlns="${DIST_NS}"><cUF>91</cUF><versaoDados>1.01</versaoDados></nfeCabecMsg>`;
+
 function distDFeInt(cnpj: string, cUFAutor: string, ambiente: Ambiente, pedido: string): string {
   return (
     `<distDFeInt xmlns="${SEFAZ_NS}" versao="1.01">` +
@@ -245,7 +252,7 @@ export async function consultarDistribuicao(req: DfeDistribuicaoRequest): Promis
     const ambiente = req.ambiente || config.sefazAmbiente;
     const pedido = `<distNSU><ultNSU>${nsu15(req.ultNSU)}</ultNSU></distNSU>`;
     const corpo = corpoDistribuicao(distDFeInt(apenasNumeros(req.cnpj), codigoUf(req.ufAutor), ambiente, pedido));
-    const resposta = await enviarSoap(URLS.distribuicao[ambiente], DIST_ACTION, corpo, req.certificado);
+    const resposta = await enviarSoap(URLS.distribuicao[ambiente], DIST_ACTION, corpo, req.certificado, '1.2', CABECALHO_DIST);
     return interpretarDistribuicao(resposta);
   } catch (e: any) {
     return falha(e);
@@ -258,7 +265,7 @@ export async function consultarPorChave(req: DfeConsultaChaveRequest): Promise<D
     const ambiente = req.ambiente || config.sefazAmbiente;
     const pedido = `<consChNFe><chNFe>${req.chaveAcesso}</chNFe></consChNFe>`;
     const corpo = corpoDistribuicao(distDFeInt(apenasNumeros(req.cnpj), codigoUf(req.ufAutor), ambiente, pedido));
-    const resposta = await enviarSoap(URLS.distribuicao[ambiente], DIST_ACTION, corpo, req.certificado);
+    const resposta = await enviarSoap(URLS.distribuicao[ambiente], DIST_ACTION, corpo, req.certificado, '1.2', CABECALHO_DIST);
     return interpretarDistribuicao(resposta, false);
   } catch (e: any) {
     return falha(e);
