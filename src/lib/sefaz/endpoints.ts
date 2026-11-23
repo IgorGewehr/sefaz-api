@@ -593,6 +593,21 @@ export function getMDFeEndpoints(ambiente: Ambiente): MdfeWebServices {
  * @returns objeto WebServices com URLs SVC-AN ou SVC-RS conforme a UF
  * @throws  Error se a UF não estiver mapeada
  */
+/** O tpEmis da SVC da UF: '6' (SVC-AN) ou '7' (SVC-RS). */
+export function tipoEmissaoSvc(uf: string): '6' | '7' {
+  const svcType = SVC_BY_UF[uf.toUpperCase()];
+  if (!svcType) {
+    throw new Error(`UF não suportada para SVC: ${uf}`);
+  }
+  return svcType === 'AN' ? '6' : '7';
+}
+
+/** A chave de acesso é de uma NF-e emitida em SVC (tpEmis 6 ou 7, posição 35). */
+export function chaveDeSvc(chaveAcesso: string): boolean {
+  const tpEmis = chaveAcesso.charAt(34);
+  return chaveAcesso.substring(20, 22) === '55' && (tpEmis === '6' || tpEmis === '7');
+}
+
 export function getSVCEndpoints(uf: string, ambiente: Ambiente): WebServices {
   const svcType = SVC_BY_UF[uf.toUpperCase()];
   if (!svcType) {

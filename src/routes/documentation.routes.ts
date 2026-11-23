@@ -80,9 +80,14 @@ const documentation = {
       {
         method: 'POST',
         path: '/nfe/emitir',
-        descricao: 'Emite uma Nota Fiscal Eletrônica (modelo 55). Assina o XML, envia à SEFAZ e retorna o resultado com protocolo de autorização.',
+        descricao: 'Emite uma Nota Fiscal Eletrônica (modelo 55). Assina o XML, envia à SEFAZ e retorna o resultado com protocolo de autorização. Com `contingencia`, emite em SVC (tpEmis 6=SVC-AN ou 7=SVC-RS, o da UF): outra chave, enviada ao webservice da SVC — use só com a SVC ativada pela SEFAZ da UF (confira com POST /nfe/status e svc: true).',
         autenticacao: true,
         request_body: {
+          contingencia: {
+            _tipo: 'object — Opcional (contingência SVC)',
+            dhCont: 'string — ISO 8601, data/hora de entrada em contingência (não no futuro)',
+            xJust: 'string — justificativa, 15 a 256 caracteres',
+          },
           emitente: {
             _tipo: 'object — OBRIGATÓRIO',
             cnpj: 'string — CNPJ do emitente (14 dígitos, sem formatação)',
@@ -507,6 +512,7 @@ const documentation = {
           certificado: { pfxBase64: 'string — OBRIGATÓRIO', password: 'string — OBRIGATÓRIO' },
           ufEmitente: 'string — OBRIGATÓRIO',
           modelo: "'55' | '65' — Opcional (55=NFe, 65=NFCe)",
+          svc: 'boolean — Opcional: o status da SVC da UF (só NF-e)',
         },
         resposta_sucesso: {
           status: 200,

@@ -234,6 +234,21 @@ export interface NFeRequest {
   numero: number;
   // UF do emitente (para selecionar o webservice correto)
   ufEmitente: string;
+  /**
+   * Contingência SVC (Sefaz Virtual de Contingência) da NF-e: com a autorizadora da UF fora e a
+   * SVC ativada por ela, a nota sai com `tpEmis` 6 (SVC-AN) ou 7 (SVC-RS) — o da UF, fixo — e
+   * vai ao webservice da SVC. A chave é outra (o tpEmis entra nela): é **outra nota**, não um
+   * reenvio da que ficou sem resposta. A NFC-e não tem SVC (a dela é a off-line, tpEmis 9).
+   */
+  contingencia?: NFeContingenciaSvc;
+}
+
+/** Contingência SVC da NF-e (ver {@link NFeRequest.contingencia}). */
+export interface NFeContingenciaSvc {
+  /** Data/hora de entrada em contingência (ISO 8601; vai ao XML no fuso da UF). */
+  dhCont: string;
+  /** Justificativa (mín. 15, máx. 256 caracteres). */
+  xJust: string;
 }
 
 // --- NFCe ---
@@ -467,4 +482,6 @@ export interface StatusServicoRequest {
   ambiente?: 'producao' | 'homologacao';
   ufEmitente: string;
   modelo?: '55' | '65'; // 55=NFe, 65=NFCe
+  /** O status da SVC da UF (só NF-e): se ela atende, a nota pode ir em contingência SVC. */
+  svc?: boolean;
 }

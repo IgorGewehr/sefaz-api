@@ -951,7 +951,8 @@ export function buildNFeXml(
     idDest,
     cMunFG: request.emitente.endereco.codigoMunicipio,
     tpImp: '1', // 1=DANFE retrato
-    tpEmis: '1', // 1=Emissão normal
+    // 1=Normal; em contingência SVC, 6 (SVC-AN) ou 7 (SVC-RS) — o mesmo que está na chave.
+    tpEmis: request.contingencia ? chaveAcesso.charAt(34) : '1',
     cDV,
     tpAmb,
     finNFe: request.finalidade,
@@ -961,6 +962,10 @@ export function buildNFeXml(
     procEmi: '0', // 0=Emissão com aplicação do contribuinte
     verProc: 'SefazAPI-1.0',
     referencias: request.referencias,
+    dhCont: request.contingencia
+      ? formatarDataSefaz(new Date(request.contingencia.dhCont), request.ufEmitente)
+      : undefined,
+    xJust: request.contingencia ? truncar(request.contingencia.xJust.trim(), 256) : undefined,
   });
 
   const emit = buildEmitenteGroup(request.emitente);

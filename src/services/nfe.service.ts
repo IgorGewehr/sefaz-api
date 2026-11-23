@@ -6,7 +6,8 @@ import { buildNFeXml, buildNFCeXml, buildNFCeSupl, buildNFCeSuplContingencia } f
 import { naoChegouASefaz } from '../lib/sefaz/soap-client';
 import { assinarXml, assinarEvento, assinarInutilizacao } from '../lib/sefaz/xml-signer';
 import { enviarSoap, extrairRetorno } from '../lib/sefaz/soap-client';
-import { getNFeEndpoints, getNFCeEndpoints } from '../lib/sefaz/endpoints';
+import { getNFeEndpoints, getNFCeEndpoints, getSVCEndpoints, tipoEmissaoSvc, chaveDeSvc } from '../lib/sefaz/endpoints';
+import type { WebServices } from '../lib/sefaz/endpoints';
 import {
   UF_CODES,
   gerarCodigoNumerico,
@@ -281,7 +282,38 @@ export function validateNFePayload(req: NFeRequest): string[] {
     errors.push('Formas de pagamento são obrigatórias');
   }
 
+  if (req.contingencia) errors.push(...validarContingenciaSvc(req));
+
   return errors;
+}
+
+/** dhCont (data válida, não no futuro) e xJust (15 a 256 caracteres) da contingência SVC. */
+export function validarContingenciaSvc(req: NFeRequest): string[] {
+  const erros: string[] = [];
+  const c = req.contingencia!;
+  const entrada = new Date(c.dhCont ?? '');
+  if (!c.dhCont || Number.isNaN(entrada.getTime())) {
+    erros.push('contingencia.dhCont (data/hora ISO de entrada em contingência) é obrigatório');
+  } else if (entrada.getTime() > Date.now() + 5 * 60 * 1000) {
+    erros.push('contingencia.dhCont não pode estar no futuro');
+  }
+  const just = (c.xJust ?? '').trim();
+  if (just.length < 15 || just.length > 256) {
+    erros.push('contingencia.xJust (justificativa) deve ter de 15 a 256 caracteres');
+  }
+  if (req.ufEmitente) {
+    try {
+      tipoEmissaoSvc(req.ufEmitente);
+    } catch {
+      erros.push(`UF ${req.ufEmitente} sem SVC mapeada`);
+    }
+  }
+  return erros;
+}
+
+/** Os webservices da emissão: os da UF, ou os da SVC quando a nota é de contingência SVC. */
+function webservicesDaNFe(uf: string, ambiente: 'producao' | 'homologacao', svc: boolean): WebServices {
+  return svc ? getSVCEndpoints(uf, ambiente) : getNFeEndpoints(uf, ambiente);
 }
 
 /**
@@ -605,13 +637,15 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
     const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
     const serie = request.serie || '1';
 
-    // 1. Gerar chave de acesso
+    // 1. Gerar chave de acesso (em SVC, com o tpEmis da SVC da UF — 6 ou 7)
+    const svc = !!request.contingencia;
     const { chaveAcesso, numero } = gerarChaveENumero({
       ufEmitente: request.ufEmitente,
       cnpj: request.emitente.cnpj,
       modelo: '55',
       serie,
       numero: request.numero,
+      tipoEmissao: svc ? tipoEmissaoSvc(request.ufEmitente) : '1',
     });
     chaveGerada = chaveAcesso;
 
@@ -626,8 +660,8 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
     const soapBody = wrapEnviNFe(signedXml, loteId, '1');
     xmlEnviado = signedXml;
 
-    // 5. Obter endpoint e enviar
-    const endpoints = getNFeEndpoints(request.ufEmitente, ambiente);
+    // 5. Obter endpoint e enviar (a SVC, em contingência)
+    const endpoints = webservicesDaNFe(request.ufEmitente, ambiente, svc);
     const soapResponse = await enviarSoap(
       endpoints.autorizacao,
       'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote',
@@ -645,7 +679,7 @@ export async function emitirNFe(request: NFeRequest): Promise<SefazResponse> {
       const nRec = resultado.nRec;
       const pollingResult = await pollRetAutorizacao(
         nRec,
-        request.ufEmitente,
+        endpoints,
         ambiente,
         request.certificado,
       );
@@ -703,12 +737,11 @@ function completarXmls(resultado: SefazResponse, signedXml: string, tpAmb: '1' |
  */
 async function pollRetAutorizacao(
   nRec: string,
-  ufEmitente: string,
+  endpoints: WebServices,
   ambiente: 'producao' | 'homologacao',
   certificado: CertificateData,
 ): Promise<SefazResponse> {
   const tpAmb = ambiente === 'producao' ? '1' : '2';
-  const endpoints = getNFeEndpoints(ufEmitente, ambiente);
 
   for (let attempt = 0; attempt < MAX_POLLING_ATTEMPTS; attempt++) {
     await sleep(POLLING_INTERVAL_MS);
@@ -1214,7 +1247,20 @@ export async function transmitirNFCeContingencia(
 /**
  * Consulta o protocolo de uma NFe/NFCe pela chave de acesso
  */
+/**
+ * A situação da nota pela chave. A NF-e emitida em SVC (tpEmis 6/7 na chave) é consultada
+ * primeiro na SVC; sem resposta dela — ou sem a nota lá (a SVC desativada, ou a nota já
+ * repassada) —, na autorizadora da UF, que recebe da SVC todas as notas dela.
+ */
 export async function consultarProtocolo(request: NFeConsultaRequest): Promise<SefazResponse> {
+  if (!chaveDeSvc(request.chaveAcesso)) return consultarProtocoloEm(request, false);
+  const naSvc = await consultarProtocoloEm(request, true);
+  if (naSvc.protocolo || naSvc.status === 'cancelado') return naSvc;
+  const naUf = await consultarProtocoloEm(request, false);
+  return naUf.protocolo || naUf.status === 'cancelado' || naSvc.status === 'erro' ? naUf : naSvc;
+}
+
+async function consultarProtocoloEm(request: NFeConsultaRequest, svc: boolean): Promise<SefazResponse> {
   try {
     const ambiente = request.ambiente || config.sefazAmbiente;
     const tpAmb: '1' | '2' = ambiente === 'producao' ? '1' : '2';
@@ -1232,7 +1278,7 @@ export async function consultarProtocolo(request: NFeConsultaRequest): Promise<S
     const modelo = request.chaveAcesso.substring(20, 22);
     const endpoints = modelo === '65'
       ? getNFCeEndpoints(request.ufEmitente, ambiente)
-      : getNFeEndpoints(request.ufEmitente, ambiente);
+      : webservicesDaNFe(request.ufEmitente, ambiente, svc);
 
     const soapResponse = await enviarSoap(
       endpoints.consultaProtocolo,
@@ -1590,9 +1636,12 @@ export async function statusServico(request: StatusServicoRequest): Promise<Sefa
       `</nfeDadosMsg>`;
 
     const modelo = request.modelo || '55';
+    if (request.svc && modelo === '65') {
+      throw new Error('A NFC-e não tem SVC (a contingência dela é a off-line, tpEmis 9)');
+    }
     const endpoints = modelo === '65'
       ? getNFCeEndpoints(request.ufEmitente, ambiente)
-      : getNFeEndpoints(request.ufEmitente, ambiente);
+      : webservicesDaNFe(request.ufEmitente, ambiente, !!request.svc);
 
     const soapResponse = await enviarSoap(
       endpoints.statusServico,
