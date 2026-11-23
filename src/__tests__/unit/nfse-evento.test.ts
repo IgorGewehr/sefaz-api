@@ -37,11 +37,11 @@ function makeEvento(overrides: Partial<Parameters<typeof buildEventoCancelamento
 // ── Estrutura do XML do evento ───────────────────────────────────────────────
 
 describe('buildEventoCancelamentoXml — estrutura', () => {
-  it('raiz <pedRegEvento> com namespace do Padrão Nacional e versao="1.00"', () => {
+  it('raiz <pedRegEvento> com namespace do Padrão Nacional e versao="1.01"', () => {
     const xml = makeEvento();
     expect(xml).toContain('<pedRegEvento');
     expect(xml).toContain('xmlns="http://www.sped.fazenda.gov.br/nfse"');
-    expect(xml).toContain('versao="1.00"');
+    expect(xml).toContain('versao="1.01"');
   });
 
   it('elementos do infPedReg na ordem do XSD: tpAmb → verAplic → dhEvento → CNPJAutor → chNFSe → e101101', () => {

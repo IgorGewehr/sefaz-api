@@ -104,9 +104,9 @@ describe('buildDpsXml — estrutura geral', () => {
     expect(xml).toContain('http://www.sped.fazenda.gov.br/nfse');
   });
 
-  it('versao="1.00" no elemento <DPS>', () => {
+  it('versao="1.01" no elemento <DPS> (leiaute 1.01 do padrão nacional)', () => {
     const xml = buildDpsXml(makeRequest());
-    expect(xml).toContain('versao="1.00"');
+    expect(xml).toContain('versao="1.01"');
   });
 });
 
@@ -198,9 +198,26 @@ describe('buildDpsXml — série alfanumérica', () => {
 });
 
 describe('buildDpsXml — Simples Nacional', () => {
-  it('opSimpNac=1 quando optanteSimplesNacional=true', () => {
+  // Padrão nacional (TSOpSimpNac): 1=Não optante, 2=MEI, 3=ME/EPP — não os códigos da ABRASF.
+  it('opSimpNac=3 (ME/EPP) quando optanteSimplesNacional=true', () => {
     const xml = buildDpsXml(makeRequest());
-    expect(xml).toContain('<opSimpNac>1</opSimpNac>');
+    expect(xml).toContain('<opSimpNac>3</opSimpNac>');
+  });
+
+  it('opSimpNac=2 para o MEI, sem regApTribSN e sem pTotTribSN', () => {
+    const req = makeRequest();
+    req.prestador.mei = true;
+    const xml = buildDpsXml(req);
+    expect(xml).toContain('<opSimpNac>2</opSimpNac>');
+    expect(xml).not.toContain('<regApTribSN>');
+    expect(xml).toContain('<indTotTrib>0</indTotTrib>');
+  });
+
+  it('regEspTrib do contrato antigo: 6 ("nenhum") vira 0; o nacional tem precedência', () => {
+    expect(buildDpsXml(makeRequest())).toContain('<regEspTrib>0</regEspTrib>');
+    const req = makeRequest();
+    req.prestador.regEspTribNacional = 6;
+    expect(buildDpsXml(req)).toContain('<regEspTrib>6</regEspTrib>');
   });
 
   it('contém regApTribSN quando fornecido', () => {
@@ -246,9 +263,9 @@ describe('buildDpsXml — Regime Normal', () => {
     return req;
   }
 
-  it('opSimpNac=2 quando optanteSimplesNacional=false', () => {
+  it('opSimpNac=1 (não optante) quando optanteSimplesNacional=false', () => {
     const xml = buildDpsXml(makeNormal());
-    expect(xml).toContain('<opSimpNac>2</opSimpNac>');
+    expect(xml).toContain('<opSimpNac>1</opSimpNac>');
   });
 
   it('NÃO contém regApTribSN no regime normal', () => {
@@ -355,9 +372,9 @@ describe('buildDpsXml — campos de serviço', () => {
 });
 
 describe('buildDpsXml — valores', () => {
-  it('vReceb e vServ iguais ao valorServicos', () => {
+  it('vServ igual ao valorServicos; vReceb só existe com intermediário', () => {
     const xml = buildDpsXml(makeRequest());
-    expect(xml).toContain('<vReceb>1000.00</vReceb>');
+    expect(xml).not.toContain('<vReceb>');
     expect(xml).toContain('<vServ>1000.00</vServ>');
   });
 

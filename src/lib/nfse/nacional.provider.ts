@@ -171,7 +171,190 @@ export function montarIdDps(params: {
   return `DPS${cLocEmi}2${cnpj}${serieNumerica.padStart(5, '0')}${String(params.numero).padStart(15, '0')}`;
 }
 
+// ============================================================
+// DPS do Padrão Nacional — leiaute 1.01 (Sefin Nacional)
+//
+// Conferido contra os XSD oficiais (gov.br/nfse): o vigente em produção
+// (nfse-esquemas_xsd-v1-01-20260209) e o da NT 009 (produção restrita,
+// esquemas_prod_restrita_20261020). Diferenças para uma nota comum:
+//   - NT 009: <finNFSe>0</finNFSe> obrigatório no infDPS (o vigente não aceita);
+//   - NT 009: <cNBS> antes de <xDescServ> (no vigente, depois).
+// Códigos do padrão nacional (NÃO os da ABRASF):
+//   opSimpNac: 1=Não optante, 2=MEI, 3=ME/EPP
+//   regApTribSN (só com opSimpNac=3): 1=tudo pelo SN, 2=federais pelo SN e ISSQN fora, 3=nenhum pelo SN
+//   regEspTrib: 0=Nenhum (padrão), 1=Cooperativa, 2=Estimativa, 3=ME municipal,
+//               4=Notário, 5=Autônomo, 6=Sociedade de profissionais, 9=Outros
+//               (ver regEspTribNacional: o campo antigo regEspTrib tinha outra numeração)
+// ============================================================
+
+export type LeiauteDps = 'vigente' | 'nt009';
+
+/** O leiaute da DPS: o pedido, a variável NFSE_LEIAUTE, ou NT 009 na homologação e vigente na produção. */
+export function leiauteDps(request: NfseEmitirRequest): LeiauteDps {
+  const pedido = request.leiauteDps;
+  const env = (process.env.NFSE_LEIAUTE || '').trim().toLowerCase();
+  const escolhido = pedido || env;
+  if (escolhido === 'nt009' || escolhido === 'vigente') return escolhido;
+  const ambiente = request.ambiente || config.sefazAmbiente;
+  return ambiente === 'producao' ? 'vigente' : 'nt009';
+}
+
+/** O texto como o TSString do XSD aceita: só U+0020..U+00FF, sem espaço nas pontas. */
+export function textoXsd(s: string | undefined, max: number, quebras = false): string | undefined {
+  if (!s) return undefined;
+  const trocado = s
+    .replace(/[–—−•·]/g, '-')
+    .replace(/[‘’‚′]/g, "'")
+    .replace(/[“”„″]/g, '"')
+    .replace(/…/g, '...')
+    .replace(/\r\n?/g, quebras ? '\n' : ' ')
+    .replace(quebras ? /[\t   ]/g : /[\t\n   ]/g, ' ')
+    // eslint-disable-next-line no-control-regex
+    .replace(quebras ? /[^\n\x20-\x7E\xA1-\xFF]/g : /[^\x20-\x7E\xA1-\xFF]/g, '');
+  const limpo = Array.from(trocado.trim()).slice(0, max).join('').trimEnd();
+  return limpo || undefined;
+}
+
+/** opSimpNac do padrão nacional. */
+export function opSimpNac(p: NfseEmitirRequest['prestador']): '1' | '2' | '3' {
+  if (!p.optanteSimplesNacional) return '1';
+  return p.mei || p.regimeEspecialTributacao === '5' ? '2' : '3';
+}
+
+/**
+ * regEspTrib do padrão nacional. `regEspTribNacional` é o código nacional como está. O
+ * `regEspTrib` segue o contrato antigo deste serviço (0=sem regime, 1=cooperativa, 2=estimativa,
+ * 3=MEI, 4=notário, 5=autônomo, 6=nenhum): 3 e 6 viram 0 (no nacional, 3 é "microempresa
+ * municipal" e 6 "sociedade de profissionais"; o MEI vai no opSimpNac).
+ */
+export function regEspTribNacional(p: NfseEmitirRequest['prestador']): string {
+  const validos = [0, 1, 2, 3, 4, 5, 6, 9];
+  if (p.regEspTribNacional !== undefined && validos.includes(p.regEspTribNacional)) {
+    return String(p.regEspTribNacional);
+  }
+  const antigo = p.regEspTrib;
+  if (antigo === 1 || antigo === 2 || antigo === 4 || antigo === 5) return String(antigo);
+  return '0';
+}
+
+export function buildDpsXmlNacional(request: NfseEmitirRequest, leiaute: LeiauteDps = leiauteDps(request)): string {
+  const ns = DPS_NS;
+  const cnpj = apenasNumeros(request.prestador.cnpj);
+  const v = request.valores;
+  const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
+  const op = opSimpNac(request.prestador);
+  const cTribNac = request.servico.codigoTributacaoNacional
+    || request.servico.codigoServico.replace(/\D/g, '').padEnd(6, '0');
+  const serieNumerica = /^\d+$/.test(request.rps.serie) ? String(Number(request.rps.serie)) : '1';
+  const cLocEmi = apenasNumeros(request.prestador.endereco?.codigoMunicipio || request.servico.codigoMunicipioPrestacao);
+  if (v.valorDeducoes) {
+    throw new Error('Deduções/reduções da base (vDedRed/vAjusteBC) ainda não são suportadas na DPS do padrão nacional');
+  }
+  const id = montarIdDps({ codigoMunicipio: cLocEmi, cnpj, serie: serieNumerica, numero: request.rps.numero });
+
+  const doc = create({ version: '1.0', encoding: 'UTF-8' });
+  const dps = doc.ele(ns, 'DPS').att('versao', '1.01');
+  const inf = dps.ele(ns, 'infDPS').att('Id', id);
+  inf.ele(ns, 'tpAmb').txt(ambienteEfetivo === 'producao' ? '1' : '2');
+  inf.ele(ns, 'dhEmi').txt(formatarDataSefaz(new Date(Date.now() - 60_000)));
+  inf.ele(ns, 'verAplic').txt('sefaz-api-1.01');
+  inf.ele(ns, 'serie').txt(serieNumerica);
+  inf.ele(ns, 'nDPS').txt(String(Number(request.rps.numero)));
+  inf.ele(ns, 'dCompet').txt(request.rps.dataEmissao);
+  inf.ele(ns, 'tpEmit').txt('1');
+  if (leiaute === 'nt009') inf.ele(ns, 'finNFSe').txt('0');
+  inf.ele(ns, 'cLocEmi').txt(cLocEmi);
+
+  // Prestador emitente: nome e endereço vêm do cadastro nacional.
+  const prest = inf.ele(ns, 'prest');
+  prest.ele(ns, 'CNPJ').txt(cnpj);
+  const im = textoXsd(request.prestador.inscricaoMunicipal, 15);
+  if (im) prest.ele(ns, 'IM').txt(im);
+  const regTrib = prest.ele(ns, 'regTrib');
+  regTrib.ele(ns, 'opSimpNac').txt(op);
+  if (op === '3') {
+    const ap = request.prestador.regApTribSN;
+    regTrib.ele(ns, 'regApTribSN').txt(String(ap === 2 || ap === 3 ? ap : 1));
+  }
+  regTrib.ele(ns, 'regEspTrib').txt(regEspTribNacional(request.prestador));
+
+  // Tomador — ordem do XSD: CNPJ|CPF, IM?, xNome, end?, fone?, email?
+  const doc_toma = apenasNumeros(request.tomador.cnpj || request.tomador.cpf || '');
+  if (doc_toma) {
+    const toma = inf.ele(ns, 'toma');
+    toma.ele(ns, doc_toma.length === 14 ? 'CNPJ' : 'CPF').txt(doc_toma);
+    const imToma = textoXsd(request.tomador.inscricaoMunicipal, 15);
+    if (imToma) toma.ele(ns, 'IM').txt(imToma);
+    toma.ele(ns, 'xNome').txt(textoXsd(request.tomador.nome, 300) || 'CONSUMIDOR');
+    const e = request.tomador.endereco;
+    const cMun = apenasNumeros(e?.codigoMunicipio || '');
+    const cep = apenasNumeros(e?.cep || '');
+    const lgr = textoXsd(e?.logradouro, 255);
+    const bairro = textoXsd(e?.bairro, 60);
+    if (e && cMun.length === 7 && cep.length === 8 && lgr && bairro) {
+      const end = toma.ele(ns, 'end');
+      const endNac = end.ele(ns, 'endNac');
+      endNac.ele(ns, 'cMun').txt(cMun);
+      endNac.ele(ns, 'CEP').txt(cep);
+      end.ele(ns, 'xLgr').txt(lgr);
+      end.ele(ns, 'nro').txt(textoXsd(e.numero, 60) || 'S/N');
+      const cpl = textoXsd(e.complemento, 156);
+      if (cpl) end.ele(ns, 'xCpl').txt(cpl);
+      end.ele(ns, 'xBairro').txt(bairro);
+    }
+    const fone = apenasNumeros(request.tomador.contato?.telefone || '');
+    if (fone.length >= 6 && fone.length <= 20) toma.ele(ns, 'fone').txt(fone);
+    const email = (request.tomador.contato?.email || '').trim();
+    if (email.includes('@') && email.length <= 80) toma.ele(ns, 'email').txt(email);
+  }
+
+  // Serviço — cServ: cTribNac, cTribMun?, (NT 009: cNBS?, xDescServ | vigente: xDescServ, cNBS?)
+  const serv = inf.ele(ns, 'serv');
+  serv.ele(ns, 'locPrest').ele(ns, 'cLocPrestacao').txt(apenasNumeros(request.servico.codigoMunicipioPrestacao));
+  const cServ = serv.ele(ns, 'cServ');
+  cServ.ele(ns, 'cTribNac').txt(cTribNac);
+  const cTribMun = apenasNumeros(request.servico.codigoTributacaoMunicipio || '');
+  if (cTribMun) cServ.ele(ns, 'cTribMun').txt(cTribMun);
+  const nbs = apenasNumeros(request.servico.nbs || '');
+  const desc = textoXsd(request.servico.discriminacao, 2000, true) || 'Servico prestado';
+  if (leiaute === 'nt009') {
+    if (nbs) cServ.ele(ns, 'cNBS').txt(nbs);
+    cServ.ele(ns, 'xDescServ').txt(desc);
+  } else {
+    cServ.ele(ns, 'xDescServ').txt(desc);
+    if (nbs) cServ.ele(ns, 'cNBS').txt(nbs);
+  }
+  const infCompl = textoXsd(request.informacoesComplementares, 2000);
+  if (infCompl) serv.ele(ns, 'infoCompl').ele(ns, 'xInfComp').txt(infCompl);
+
+  // Valores — vServPrest{vServ}, vDescCondIncond{vDescIncond?, vDescCond?}, trib
+  const valores = inf.ele(ns, 'valores');
+  valores.ele(ns, 'vServPrest').ele(ns, 'vServ').txt(formatarValor(v.valorServicos));
+  if (v.descontoIncondicionado || v.descontoCondicionado) {
+    const desc = valores.ele(ns, 'vDescCondIncond');
+    if (v.descontoIncondicionado) desc.ele(ns, 'vDescIncond').txt(formatarValor(v.descontoIncondicionado));
+    if (v.descontoCondicionado) desc.ele(ns, 'vDescCond').txt(formatarValor(v.descontoCondicionado));
+  }
+  const trib = valores.ele(ns, 'trib');
+  const tribMun = trib.ele(ns, 'tribMun');
+  const tribISSQN = request.servico.idTribMun || '1';
+  tribMun.ele(ns, 'tribISSQN').txt(tribISSQN);
+  if (tribISSQN === '3' && request.servico.codigoPaisPrestacao) {
+    tribMun.ele(ns, 'cPaisResult').txt(request.servico.codigoPaisPrestacao);
+  }
+  tribMun.ele(ns, 'tpRetISSQN').txt(v.issRetido ? '2' : '1');
+  if (op === '1') tribMun.ele(ns, 'pAliq').txt(formatarValor(v.aliquotaIss * 100, 2));
+  const totTrib = trib.ele(ns, 'totTrib');
+  if (op === '3' && v.aliquotaIss > 0) {
+    totTrib.ele(ns, 'pTotTribSN').txt(formatarValor(v.aliquotaIss * 100, 2));
+  } else {
+    totTrib.ele(ns, 'indTotTrib').txt('0');
+  }
+  return doc.end({ prettyPrint: false });
+}
+
 export function buildDpsXml(request: NfseEmitirRequest, ns: string = DPS_NS): string {
+  if (ns === DPS_NS) return buildDpsXmlNacional(request);
   const cnpj = apenasNumeros(request.prestador.cnpj);
   const v = request.valores;
   const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
@@ -444,11 +627,11 @@ export function buildEventoCancelamentoXml(params: {
 
   // xmlbuilder2 escapa &, <, >, " e ' em .txt() — xMotivo livre de injection.
   const doc = create({ version: '1.0', encoding: 'UTF-8' });
-  const ped = doc.ele(DPS_NS, 'pedRegEvento').att('versao', '1.00');
+  const ped = doc.ele(DPS_NS, 'pedRegEvento').att('versao', '1.01');
   const inf = ped.ele(DPS_NS, 'infPedReg').att('Id', idPedReg);
 
   inf.ele(DPS_NS, 'tpAmb').txt(params.ambiente === 'producao' ? '1' : '2');
-  inf.ele(DPS_NS, 'verAplic').txt('sefaz-api-1.0');
+  inf.ele(DPS_NS, 'verAplic').txt('sefaz-api-1.01');
   inf.ele(DPS_NS, 'dhEvento').txt(formatarDataSefaz());
   inf.ele(DPS_NS, docAutor.length === 14 ? 'CNPJAutor' : 'CPFAutor').txt(docAutor);
   inf.ele(DPS_NS, 'chNFSe').txt(chave);
@@ -504,12 +687,16 @@ function extrairMensagens(data: any): NfseMensagemRetorno[] {
     });
   }
 
-  if (data?.erros && Array.isArray(data.erros)) {
-    for (const e of data.erros) {
+  // A Sefin já respondeu "erros"/"Erros" com "codigo"/"Codigo" e "descricao"/"Descricao".
+  const erros = data?.erros || data?.Erros;
+  if (erros && Array.isArray(erros)) {
+    for (const e of erros) {
       msgs.push({
-        codigo: String(e.codigo || '0'),
-        mensagem: String(e.mensagem || e.descricao || 'Erro'),
-        correcao: e.correcao ? String(e.correcao) : undefined,
+        codigo: String(e.codigo || e.Codigo || '0'),
+        mensagem: String(e.mensagem || e.descricao || e.Descricao || 'Erro'),
+        correcao: e.correcao || e.complemento || e.Complemento
+          ? String(e.correcao || e.complemento || e.Complemento)
+          : undefined,
       });
     }
   }
@@ -643,22 +830,26 @@ export class NacionalProvider implements INfseProvider {
         request.servico.codigoTributacaoNacional = request.servico.codigoServico.replace(/\D/g, '').padEnd(6, '0');
       }
 
-      const xmlDps = buildDpsXml(request);
-      const dpsXmlGZipB64 = empacotarDps(xmlDps, request.certificado);
-
       // Mesmo ambiente do tpAmb do DPS (buildDpsXml usa request.ambiente) —
       // divergir aqui mandaria DPS de homologação pro endpoint de produção.
       const ambienteEfetivo = request.ambiente || config.sefazAmbiente;
       const endpoints = getAdnEndpoints(ambienteEfetivo);
-
-      const { status, data } = await httpRequest(
-        'POST',
-        endpoints.emitir,
-        request.certificado,
-        { dpsXmlGZipB64 },
-      );
-
-      return parseEmitirResponse(status, data);
+      const enviar = async (leiaute: LeiauteDps) => {
+        const xmlDps = buildDpsXmlNacional(request, leiaute);
+        const dpsXmlGZipB64 = empacotarDps(xmlDps, request.certificado);
+        const { status, data } = await httpRequest('POST', endpoints.emitir, request.certificado, { dpsXmlGZipB64 });
+        return parseEmitirResponse(status, data);
+      };
+      const leiaute = leiauteDps(request);
+      const resposta = await enviar(leiaute);
+      // Recusa pelo esquema (E1235): a Sefin está no outro leiaute 1.01 (virada da NT 009).
+      const peloEsquema = resposta.status === 'rejeitado'
+        && (resposta.mensagens || []).some((m) => m.codigo === 'E1235' || m.codigo === 'RNG6110');
+      if (peloEsquema) {
+        console.warn(`[ADN] DPS recusada pelo esquema no leiaute ${leiaute}; tentando o outro`);
+        return enviar(leiaute === 'vigente' ? 'nt009' : 'vigente');
+      }
+      return resposta;
     } catch (error: any) {
       console.error('[ADN] Falha interna ao emitir:', error.message);
       return {

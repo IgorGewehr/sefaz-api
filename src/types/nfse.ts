@@ -19,23 +19,32 @@ export interface NfsePrestador {
   regimeEspecialTributacao?: '1' | '2' | '3' | '4' | '5' | '6';
   /** Optante Simples Nacional */
   optanteSimplesNacional: boolean;
+  /** Optante MEI (no padrão nacional: opSimpNac=2; sem isso, o optante vai como ME/EPP=3). */
+  mei?: boolean;
   /** Incentivador cultural */
   incentivadorCultural?: boolean;
 
   // --- Campos ADN (DPS REST) ---
 
   /**
-   * Regime de apuração de tributação do Simples Nacional (ADN):
-   * 1=Receita bruta, 2=ME/EPP (Sublimites), 3=SIMEI, 4=Fixo
+   * Regime de apuração do Simples (padrão nacional, só ME/EPP — opSimpNac=3):
+   * 1=tributos federais e municipal pelo SN (padrão), 2=federais pelo SN e ISSQN fora (sublimite),
+   * 3=federais e municipal fora do SN (limite)
    */
   regApTribSN?: number;
   /**
-   * Regime especial de tributação no ADN:
-   * 0=Sem regime, 1=Cooperativa, 2=Estimativa,
-   * 3=Microempresário Individual, 4=Notário/Registrador,
-   * 5=Profissional Autônomo, 6=Nenhum
+   * Regime especial (contrato antigo deste serviço — mantido): 0=Sem regime, 1=Cooperativa,
+   * 2=Estimativa, 3=Microempresário Individual, 4=Notário/Registrador, 5=Profissional Autônomo,
+   * 6=Nenhum. No padrão nacional, 3 e 6 viram 0 (o MEI vai em `mei`/opSimpNac).
    */
   regEspTrib?: number;
+  /**
+   * Regime especial no código do padrão nacional (TSRegEspTrib), quando precisar de um que o
+   * contrato antigo não tem: 0=Nenhum, 1=Ato cooperado, 2=Estimativa, 3=Microempresa municipal,
+   * 4=Notário ou registrador, 5=Profissional autônomo, 6=Sociedade de profissionais, 9=Outros.
+   * Tem precedência sobre `regEspTrib`.
+   */
+  regEspTribNacional?: number;
 }
 
 // --- Tomador de Serviço ---
@@ -193,6 +202,12 @@ export interface NfseEmitirRequest {
   certificado: CertificateData;
   /** Ambiente de emissão (sobrescreve SEFAZ_AMBIENTE do servidor) */
   ambiente?: 'producao' | 'homologacao';
+  /**
+   * Leiaute 1.01 da DPS no padrão nacional: 'vigente' (produção) ou 'nt009' (produção restrita
+   * desde 20/10/2026). Sem isso: NFSE_LEIAUTE, ou NT 009 na homologação e vigente na produção.
+   * Recusada pelo esquema (E1235), a emissão tenta o outro leiaute uma vez.
+   */
+  leiauteDps?: 'vigente' | 'nt009';
 }
 
 // --- Request de lote ---
