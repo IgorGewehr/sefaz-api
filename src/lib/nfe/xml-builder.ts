@@ -340,9 +340,11 @@ function buildPisGroup(pis: NFeItemImposto['pis']): Record<string, any> {
       cst === '70' || cst === '71' || cst === '72' || cst === '73' ||
       cst === '74' || cst === '75' || cst === '98' || cst === '99') {
     const pisOutr: Record<string, any> = { CST: cst };
-    if (pis.valorBC !== undefined) pisOutr['vBC'] = formatarValor(pis.valorBC);
-    if (pis.aliquota !== undefined) pisOutr['pPIS'] = formatarValor(pis.aliquota, 4);
-    if (pis.valor !== undefined) pisOutr['vPIS'] = formatarValor(pis.valor);
+    // O XSD exige vBC + pPIS (ou qBCProd + vAliqProd) e vPIS no grupo Outr — sem eles a
+    // nota cai por schema (225). Sem valores informados (ex.: CST 49/99 no Simples), zeros.
+    pisOutr['vBC'] = formatarValor(pis.valorBC ?? 0);
+    pisOutr['pPIS'] = formatarValor(pis.aliquota ?? 0, 4);
+    pisOutr['vPIS'] = formatarValor(pis.valor ?? 0);
     return { PISOutr: pisOutr };
   }
 
@@ -401,9 +403,11 @@ function buildCofinsGroup(cofins: NFeItemImposto['cofins']): Record<string, any>
       cst === '70' || cst === '71' || cst === '72' || cst === '73' ||
       cst === '74' || cst === '75' || cst === '98' || cst === '99') {
     const cofOutr: Record<string, any> = { CST: cst };
-    if (cofins.valorBC !== undefined) cofOutr['vBC'] = formatarValor(cofins.valorBC);
-    if (cofins.aliquota !== undefined) cofOutr['pCOFINS'] = formatarValor(cofins.aliquota, 4);
-    if (cofins.valor !== undefined) cofOutr['vCOFINS'] = formatarValor(cofins.valor);
+    // O XSD exige vBC + pCOFINS (ou qBCProd + vAliqProd) e vCOFINS no grupo Outr — sem eles a
+    // nota cai por schema (225). Sem valores informados (ex.: CST 49/99 no Simples), zeros.
+    cofOutr['vBC'] = formatarValor(cofins.valorBC ?? 0);
+    cofOutr['pCOFINS'] = formatarValor(cofins.aliquota ?? 0, 4);
+    cofOutr['vCOFINS'] = formatarValor(cofins.valor ?? 0);
     return { COFINSOutr: cofOutr };
   }
 
@@ -581,15 +585,6 @@ function buildIdeGroup(params: {
   ide['idDest'] = params.idDest;
   ide['cMunFG'] = params.cMunFG;
 
-  // NFref: no XSD 4.00 (TIde) o grupo fica entre cMunFG (B12) e tpImp (B21).
-  // 0..500 ocorrências; xmlbuilder2 serializa arrays como tags repetidas.
-  // (Posição errada aqui = rejeição 225 em toda devolução/complementar.)
-  if (params.referencias && params.referencias.length > 0) {
-    ide['NFref'] = params.referencias.map((ref) => ({
-      refNFe: apenasNumeros(ref.refNFe),
-    }));
-  }
-
   ide['tpImp'] = params.tpImp;
   ide['tpEmis'] = params.tpEmis;
   ide['cDV'] = params.cDV;
@@ -609,6 +604,16 @@ function buildIdeGroup(params: {
   // São os ÚLTIMOS elementos do <ide> no XSD 4.00.
   if (params.dhCont) ide['dhCont'] = params.dhCont;
   if (params.xJust) ide['xJust'] = params.xJust;
+
+  // NFref: no XSD 4.00 (leiauteNFe_v4.00, TNFe/infNFe/ide) o grupo é o ÚLTIMO do <ide>,
+  // depois de dhCont/xJust — o número B12a do manual não é a posição no schema.
+  // 0..999 ocorrências; xmlbuilder2 serializa arrays como tags repetidas.
+  // (Posição errada aqui = rejeição 225 em toda devolução/complementar.)
+  if (params.referencias && params.referencias.length > 0) {
+    ide['NFref'] = params.referencias.map((ref) => ({
+      refNFe: apenasNumeros(ref.refNFe),
+    }));
+  }
 
   return ide;
 }

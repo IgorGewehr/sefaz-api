@@ -117,7 +117,7 @@ describe('NF-e de devolução', () => {
     expect(xml).toContain('<vIPIDevol>1.50</vIPIDevol><vPIS>');
     // 18,00 + ST 2,12 + FCP-ST 0,50 + IPI devolvido 1,50
     expect(xml).toContain('<vNF>22.12</vNF>');
-    expect(xml).toContain(`<NFref><refNFe>${ORIGINAL}</refNFe></NFref>`);
+    expect(xml).toContain(`<NFref><refNFe>${ORIGINAL}</refNFe></NFref></ide>`);
     expect(xml).toContain('<finNFe>4</finNFe>');
   });
 
